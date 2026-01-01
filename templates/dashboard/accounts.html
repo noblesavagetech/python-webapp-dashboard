@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+
+{% block title %}Accounts - FinanceIQ{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+{% endblock %}
+
+{% block body %}
+<div class="dashboard-layout">
+    <!-- Sidebar (same as main dashboard) -->
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <a href="{{ url_for('main.dashboard') }}" class="logo">
+                <i class="fas fa-chart-line"></i>
+                <span>FinanceIQ</span>
+            </a>
+        </div>
+
+        <nav class="sidebar-nav">
+            <ul>
+                <li>
+                    <a href="{{ url_for('main.dashboard') }}">
+                        <i class="fas fa-home"></i>
+                        <span>Dashboard</span>
+                    </a>
+                </li>
+                <li class="active">
+                    <a href="{{ url_for('main.accounts') }}">
+                        <i class="fas fa-wallet"></i>
+                        <span>Accounts</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="{{ url_for('main.transactions') }}">
+                        <i class="fas fa-exchange-alt"></i>
+                        <span>Transactions</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="{{ url_for('main.investments') }}">
+                        <i class="fas fa-briefcase"></i>
+                        <span>Investments</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="{{ url_for('main.settings') }}">
+                        <i class="fas fa-cog"></i>
+                        <span>Settings</span>
+                    </a>
+                </li>
+            </ul>
+        </nav>
+
+        <div class="sidebar-footer">
+            <div class="user-info">
+                <div class="user-avatar">
+                    <i class="fas fa-user"></i>
+                </div>
+                <div class="user-details">
+                    <span class="user-name">{{ current_user.full_name }}</span>
+                    <span class="user-email">{{ current_user.email }}</span>
+                </div>
+            </div>
+            <a href="{{ url_for('auth.logout') }}" class="logout-btn" title="Sign Out">
+                <i class="fas fa-sign-out-alt"></i>
+            </a>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <header class="dashboard-header">
+            <div class="header-left">
+                <button class="sidebar-toggle" id="sidebarToggle">
+                    <i class="fas fa-bars"></i>
+                </button>
+                <div class="header-title">
+                    <h1>Accounts</h1>
+                    <p class="header-subtitle">Manage your linked financial accounts</p>
+                </div>
+            </div>
+            <div class="header-right">
+                <button class="btn btn-primary" id="addAccountBtn" onclick="openPlaidLink()">
+                    <i class="fas fa-plus"></i>
+                    <span>Link Account</span>
+                </button>
+            </div>
+        </header>
+
+        <div class="dashboard-content">
+            <div class="loading-overlay" id="loadingOverlay">
+                <div class="loading-spinner">
+                    <i class="fas fa-circle-notch fa-spin"></i>
+                    <p>Loading accounts...</p>
+                </div>
+            </div>
+
+            <!-- Account Totals -->
+            <section class="dashboard-section">
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon assets">
+                            <i class="fas fa-landmark"></i>
+                        </div>
+                        <div class="stat-content">
+                            <span class="stat-label">Total Assets</span>
+                            <span class="stat-value" id="totalAssets">$--</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon liabilities">
+                            <i class="fas fa-credit-card"></i>
+                        </div>
+                        <div class="stat-content">
+                            <span class="stat-label">Total Liabilities</span>
+                            <span class="stat-value" id="totalLiabilities">$--</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon net-worth">
+                            <i class="fas fa-coins"></i>
+                        </div>
+                        <div class="stat-content">
+                            <span class="stat-label">Net Worth</span>
+                            <span class="stat-value" id="netWorth">$--</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon institutions">
+                            <i class="fas fa-university"></i>
+                        </div>
+                        <div class="stat-content">
+                            <span class="stat-label">Institutions</span>
+                            <span class="stat-value" id="institutionsCount">--</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Accounts by Institution -->
+            <section class="dashboard-section">
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Linked Institutions</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="institutions-list" id="institutionsList">
+                            <div class="empty-state">
+                                <i class="fas fa-university"></i>
+                                <h3>No accounts linked</h3>
+                                <p>Connect your bank accounts, credit cards, and investments to get started.</p>
+                                <button class="btn btn-primary" onclick="openPlaidLink()">
+                                    <i class="fas fa-plus"></i>
+                                    Link Your First Account
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </main>
+</div>
+
+<div id="plaid-link-container"></div>
+<div class="toast-container" id="toastContainer"></div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"></script>
+<script src="{{ url_for('static', filename='js/accounts.js') }}"></script>
+{% endblock %}

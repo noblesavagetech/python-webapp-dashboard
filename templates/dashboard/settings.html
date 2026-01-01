@@ -1,0 +1,226 @@
+{% extends "base.html" %}
+
+{% block title %}Settings - FinanceIQ{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+{% endblock %}
+
+{% block body %}
+<div class="dashboard-layout">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <a href="{{ url_for('main.dashboard') }}" class="logo">
+                <i class="fas fa-chart-line"></i>
+                <span>FinanceIQ</span>
+            </a>
+        </div>
+
+        <nav class="sidebar-nav">
+            <ul>
+                <li>
+                    <a href="{{ url_for('main.dashboard') }}">
+                        <i class="fas fa-home"></i>
+                        <span>Dashboard</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="{{ url_for('main.accounts') }}">
+                        <i class="fas fa-wallet"></i>
+                        <span>Accounts</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="{{ url_for('main.transactions') }}">
+                        <i class="fas fa-exchange-alt"></i>
+                        <span>Transactions</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="{{ url_for('main.investments') }}">
+                        <i class="fas fa-briefcase"></i>
+                        <span>Investments</span>
+                    </a>
+                </li>
+                <li class="active">
+                    <a href="{{ url_for('main.settings') }}">
+                        <i class="fas fa-cog"></i>
+                        <span>Settings</span>
+                    </a>
+                </li>
+            </ul>
+        </nav>
+
+        <div class="sidebar-footer">
+            <div class="user-info">
+                <div class="user-avatar">
+                    <i class="fas fa-user"></i>
+                </div>
+                <div class="user-details">
+                    <span class="user-name">{{ current_user.full_name }}</span>
+                    <span class="user-email">{{ current_user.email }}</span>
+                </div>
+            </div>
+            <a href="{{ url_for('auth.logout') }}" class="logout-btn" title="Sign Out">
+                <i class="fas fa-sign-out-alt"></i>
+            </a>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <header class="dashboard-header">
+            <div class="header-left">
+                <button class="sidebar-toggle" id="sidebarToggle">
+                    <i class="fas fa-bars"></i>
+                </button>
+                <div class="header-title">
+                    <h1>Settings</h1>
+                    <p class="header-subtitle">Manage your account preferences</p>
+                </div>
+            </div>
+        </header>
+
+        <div class="dashboard-content">
+            <!-- Profile Settings -->
+            <section class="dashboard-section">
+                <div class="card settings-card">
+                    <div class="card-header">
+                        <h3><i class="fas fa-user"></i> Profile</h3>
+                    </div>
+                    <div class="card-body">
+                        <form id="profileForm" class="settings-form">
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="firstName">First Name</label>
+                                    <input type="text" id="firstName" name="first_name" 
+                                           value="{{ current_user.first_name or '' }}">
+                                </div>
+                                <div class="form-group">
+                                    <label for="lastName">Last Name</label>
+                                    <input type="text" id="lastName" name="last_name"
+                                           value="{{ current_user.last_name or '' }}">
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="email">Email</label>
+                                <input type="email" id="email" value="{{ current_user.email }}" disabled>
+                                <small>Email cannot be changed</small>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="currency">Default Currency</label>
+                                    <select id="currency" name="default_currency">
+                                        <option value="USD" {{ 'selected' if current_user.default_currency == 'USD' }}>USD ($)</option>
+                                        <option value="EUR" {{ 'selected' if current_user.default_currency == 'EUR' }}>EUR (€)</option>
+                                        <option value="GBP" {{ 'selected' if current_user.default_currency == 'GBP' }}>GBP (£)</option>
+                                        <option value="CAD" {{ 'selected' if current_user.default_currency == 'CAD' }}>CAD ($)</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="timezone">Timezone</label>
+                                    <select id="timezone" name="timezone">
+                                        <option value="UTC" {{ 'selected' if current_user.timezone == 'UTC' }}>UTC</option>
+                                        <option value="America/New_York" {{ 'selected' if current_user.timezone == 'America/New_York' }}>Eastern Time</option>
+                                        <option value="America/Chicago" {{ 'selected' if current_user.timezone == 'America/Chicago' }}>Central Time</option>
+                                        <option value="America/Denver" {{ 'selected' if current_user.timezone == 'America/Denver' }}>Mountain Time</option>
+                                        <option value="America/Los_Angeles" {{ 'selected' if current_user.timezone == 'America/Los_Angeles' }}>Pacific Time</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="form-actions">
+                                <button type="submit" class="btn btn-primary">Save Changes</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Security Settings -->
+            <section class="dashboard-section">
+                <div class="card settings-card">
+                    <div class="card-header">
+                        <h3><i class="fas fa-shield-alt"></i> Security</h3>
+                    </div>
+                    <div class="card-body">
+                        <form id="passwordForm" class="settings-form">
+                            <div class="form-group">
+                                <label for="currentPassword">Current Password</label>
+                                <input type="password" id="currentPassword" name="current_password" required>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="newPassword">New Password</label>
+                                    <input type="password" id="newPassword" name="new_password" required minlength="8">
+                                </div>
+                                <div class="form-group">
+                                    <label for="confirmPassword">Confirm New Password</label>
+                                    <input type="password" id="confirmPassword" name="confirm_password" required>
+                                </div>
+                            </div>
+                            <div class="form-actions">
+                                <button type="submit" class="btn btn-primary">Update Password</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Connected Accounts -->
+            <section class="dashboard-section">
+                <div class="card settings-card">
+                    <div class="card-header">
+                        <h3><i class="fas fa-link"></i> Connected Accounts</h3>
+                        <button class="btn btn-primary btn-sm" onclick="openPlaidLink()">
+                            <i class="fas fa-plus"></i> Link Account
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <div class="connected-accounts" id="connectedAccounts">
+                            <p class="loading-text">Loading connected accounts...</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Data & Privacy -->
+            <section class="dashboard-section">
+                <div class="card settings-card danger-zone">
+                    <div class="card-header">
+                        <h3><i class="fas fa-exclamation-triangle"></i> Danger Zone</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="danger-item">
+                            <div class="danger-info">
+                                <h4>Export Your Data</h4>
+                                <p>Download all your financial data in CSV format.</p>
+                            </div>
+                            <button class="btn btn-outline" id="exportDataBtn">
+                                <i class="fas fa-download"></i> Export
+                            </button>
+                        </div>
+                        <div class="danger-item">
+                            <div class="danger-info">
+                                <h4>Delete Account</h4>
+                                <p>Permanently delete your account and all data. This action cannot be undone.</p>
+                            </div>
+                            <button class="btn btn-danger" id="deleteAccountBtn">
+                                <i class="fas fa-trash"></i> Delete Account
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </main>
+</div>
+
+<div id="plaid-link-container"></div>
+<div class="toast-container" id="toastContainer"></div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"></script>
+<script src="{{ url_for('static', filename='js/settings.js') }}"></script>
+{% endblock %}

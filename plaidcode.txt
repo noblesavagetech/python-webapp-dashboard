@@ -1,0 +1,3029 @@
+Financial Intelligence Dashboard - Solution Architecture
+Executive Summary
+I'll design a comprehensive Financial Intelligence Dashboard that transforms raw Plaid banking data into actionable business intelligence. This solution will integrate seamlessly with your existing Flask/Python infrastructure, Docker containerization, and Railway deployment pipeline.
+
+System Architecture Overview
+
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                           FINANCIAL INTELLIGENCE DASHBOARD                       │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐    ┌──────────────┐  │
+│  │   Plaid      │    │   Flask      │    │  PostgreSQL  │    │   Railway    │  │
+│  │   Link       │───▶│   Backend    │───▶│   Database   │───▶│   Deploy     │  │
+│  │   (Frontend) │    │   (API)      │    │   (Data)     │    │   (Host)     │  │
+│  └──────────────┘    └──────────────┘    └──────────────┘    └──────────────┘  │
+│         │                   │                   │                              │
+│         ▼                   ▼                   ▼                              │
+│  ┌──────────────────────────────────────────────────────────────────────────┐  │
+│  │                        CORE MODULES                                       │  │
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐     │  │
+│  │  │ Net Worth   │  │ Cash Flow   │  │ Portfolio   │  │ Alerts &    │     │  │
+│  │  │ Tracker     │  │ Automation  │  │ Manager     │  │ Reports     │     │  │
+│  │  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘     │  │
+│  └──────────────────────────────────────────────────────────────────────────┘  │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+Detailed Module Design
+Module 1: Plaid Integration Layer
+
+# app/services/plaid_service.py
+
+import plaid
+from plaid.api import plaid_api
+from plaid.model.link_token_create_request import LinkTokenCreateRequest
+from plaid.model.link_token_create_request_user import LinkTokenCreateRequestUser
+from plaid.model.products import Products
+from plaid.model.country_code import CountryCode
+from plaid.model.item_public_token_exchange_request import ItemPublicTokenExchangeRequest
+from plaid.model.transactions_get_request import TransactionsGetRequest
+from plaid.model.accounts_balance_get_request import AccountsBalanceGetRequest
+from plaid.model.investments_holdings_get_request import InvestmentsHoldingsGetRequest
+from plaid.model.investments_transactions_get_request import InvestmentsTransactionsGetRequest
+from plaid.model.liabilities_get_request import LiabilitiesGetRequest
+from flask import current_app
+from datetime import datetime, timedelta
+import os
+
+
+class PlaidService:
+    """
+    Core Plaid integration service handling all API communications
+    """
+    
+    def __init__(self):
+        configuration = plaid.Configuration(
+            host=plaid.Environment.Sandbox,  # Change to Production for live
+            api_key={
+                'clientId': os.environ.get('PLAID_CLIENT_ID'),
+                'secret': os.environ.get('PLAID_SECRET'),
+            }
+        )
+        api_client = plaid.ApiClient(configuration)
+        self.client = plaid_api.PlaidApi(api_client)
+    
+    def create_link_token(self, user_id: str) -> dict:
+        """
+        Create a Link token for initializing Plaid Link
+        Products: transactions, auth, identity, investments, liabilities, assets
+        """
+        request = LinkTokenCreateRequest(
+            user=LinkTokenCreateRequestUser(client_user_id=user_id),
+            client_name="Financial Intelligence Dashboard",
+            products=[
+                Products("transactions"),
+                Products("auth"),
+                Products("identity"),
+                Products("investments"),
+                Products("liabilities"),
+            ],
+            country_codes=[CountryCode("US")],
+            language="en",
+            webhook=os.environ.get('PLAID_WEBHOOK_URL'),
+        )
+        response = self.client.link_token_create(request)
+        return response.to_dict()
+    
+    def exchange_public_token(self, public_token: str) -> dict:
+        """
+        Exchange public token for access token after user completes Link
+        """
+        request = ItemPublicTokenExchangeRequest(public_token=public_token)
+        response = self.client.item_public_token_exchange(request)
+        return {
+            'access_token': response.access_token,
+            'item_id': response.item_id
+        }
+    
+    def get_accounts_balance(self, access_token: str) -> dict:
+        """
+        Retrieve real-time balance information for all accounts
+        """
+        request = AccountsBalanceGetRequest(access_token=access_token)
+        response = self.client.accounts_balance_get(request)
+        return response.to_dict()
+    
+    def get_transactions(self, access_token: str, start_date: datetime = None, 
+                         end_date: datetime = None) -> dict:
+        """
+        Retrieve transaction history with pagination support
+        """
+        if not start_date:
+            start_date = datetime.now() - timedelta(days=90)
+        if not end_date:
+            end_date = datetime.now()
+        
+        request = TransactionsGetRequest(
+            access_token=access_token,
+            start_date=start_date.date(),
+            end_date=end_date.date(),
+            options={
+                'count': 500,
+                'offset': 0,
+                'include_personal_finance_category': True
+            }
+        )
+        response = self.client.transactions_get(request)
+        
+        transactions = response.transactions
+        total = response.total_transactions
+        
+        # Paginate through all transactions
+        while len(transactions) < total:
+            request.options['offset'] = len(transactions)
+            response = self.client.transactions_get(request)
+            transactions.extend(response.transactions)
+        
+        return {
+            'accounts': [a.to_dict() for a in response.accounts],
+            'transactions': [t.to_dict() for t in transactions],
+            'total_transactions': total
+        }
+    
+    def get_investments_holdings(self, access_token: str) -> dict:
+        """
+        Retrieve investment holdings and securities data
+        """
+        request = InvestmentsHoldingsGetRequest(access_token=access_token)
+        response = self.client.investments_holdings_get(request)
+        return {
+            'accounts': [a.to_dict() for a in response.accounts],
+            'holdings': [h.to_dict() for h in response.holdings],
+            'securities': [s.to_dict() for s in response.securities]
+        }
+    
+    def get_investments_transactions(self, access_token: str, 
+                                      start_date: datetime = None,
+                                      end_date: datetime = None) -> dict:
+        """
+        Retrieve investment transaction history
+        """
+        if not start_date:
+            start_date = datetime.now() - timedelta(days=365)
+        if not end_date:
+            end_date = datetime.now()
+        
+        request = InvestmentsTransactionsGetRequest(
+            access_token=access_token,
+            start_date=start_date.date(),
+            end_date=end_date.date()
+        )
+        response = self.client.investments_transactions_get(request)
+        return {
+            'accounts': [a.to_dict() for a in response.accounts],
+            'investment_transactions': [t.to_dict() for t in response.investment_transactions],
+            'securities': [s.to_dict() for s in response.securities]
+        }
+    
+    def get_liabilities(self, access_token: str) -> dict:
+        """
+        Retrieve liability/debt information (credit cards, loans, mortgages)
+        """
+        request = LiabilitiesGetRequest(access_token=access_token)
+        response = self.client.liabilities_get(request)
+        return {
+            'accounts': [a.to_dict() for a in response.accounts],
+            'liabilities': response.liabilities.to_dict()
+        }
+Module 2: Database Models
+
+# app/models/financial_models.py
+
+from app import db
+from datetime import datetime
+from sqlalchemy.dialects.postgresql import JSON, ARRAY
+from sqlalchemy import Index
+import uuid
+
+
+class PlaidItem(db.Model):
+    """
+    Represents a Plaid Item (connection to a financial institution)
+    """
+    __tablename__ = 'plaid_items'
+    
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = db.Column(db.String(36), db.ForeignKey('users.id'), nullable=False)
+    item_id = db.Column(db.String(255), unique=True, nullable=False)
+    access_token = db.Column(db.Text, nullable=False)  # Encrypted in production
+    institution_id = db.Column(db.String(50))
+    institution_name = db.Column(db.String(255))
+    status = db.Column(db.String(20), default='active')  # active, error, pending_expiration
+    consent_expiration_time = db.Column(db.DateTime)
+    last_synced_at = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    accounts = db.relationship('Account', backref='plaid_item', lazy='dynamic', cascade='all, delete-orphan')
+    
+    __table_args__ = (
+        Index('idx_plaid_items_user_id', 'user_id'),
+        Index('idx_plaid_items_item_id', 'item_id'),
+    )
+
+
+class Account(db.Model):
+    """
+    Financial account linked through Plaid
+    """
+    __tablename__ = 'accounts'
+    
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    plaid_item_id = db.Column(db.String(36), db.ForeignKey('plaid_items.id'), nullable=False)
+    user_id = db.Column(db.String(36), db.ForeignKey('users.id'), nullable=False)
+    account_id = db.Column(db.String(255), unique=True, nullable=False)  # Plaid account_id
+    
+    # Account Details
+    name = db.Column(db.String(255))
+    official_name = db.Column(db.String(255))
+    mask = db.Column(db.String(10))  # Last 4 digits
+    type = db.Column(db.String(50))  # depository, investment, loan, credit
+    subtype = db.Column(db.String(50))  # checking, savings, 401k, credit card, etc.
+    
+    # Balance Information (updated regularly)
+    balance_available = db.Column(db.Numeric(15, 2))
+    balance_current = db.Column(db.Numeric(15, 2))
+    balance_limit = db.Column(db.Numeric(15, 2))
+    iso_currency_code = db.Column(db.String(3), default='USD')
+    
+    # Classification for net worth calculation
+    is_asset = db.Column(db.Boolean, default=True)
+    is_liquid = db.Column(db.Boolean, default=False)
+    include_in_net_worth = db.Column(db.Boolean, default=True)
+    custom_category = db.Column(db.String(100))  # User-defined category
+    
+    # Metadata
+    is_active = db.Column(db.Boolean, default=True)
+    last_balance_update = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    transactions = db.relationship('Transaction', backref='account', lazy='dynamic', cascade='all, delete-orphan')
+    holdings = db.relationship('Holding', backref='account', lazy='dynamic', cascade='all, delete-orphan')
+    balance_history = db.relationship('BalanceSnapshot', backref='account', lazy='dynamic', cascade='all, delete-orphan')
+    
+    __table_args__ = (
+        Index('idx_accounts_user_id', 'user_id'),
+        Index('idx_accounts_type', 'type'),
+        Index('idx_accounts_plaid_account_id', 'account_id'),
+    )
+
+
+class Transaction(db.Model):
+    """
+    Individual financial transactions
+    """
+    __tablename__ = 'transactions'
+    
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    account_id = db.Column(db.String(36), db.ForeignKey('accounts.id'), nullable=False)
+    user_id = db.Column(db.String(36), db.ForeignKey('users.id'), nullable=False)
+    transaction_id = db.Column(db.String(255), unique=True, nullable=False)  # Plaid transaction_id
+    
+    # Transaction Details
+    amount = db.Column(db.Numeric(15, 2), nullable=False)
+    iso_currency_code = db.Column(db.String(3), default='USD')
+    date = db.Column(db.Date, nullable=False)
+    datetime = db.Column(db.DateTime)
+    authorized_date = db.Column(db.Date)
+    
+    # Merchant/Description
+    name = db.Column(db.String(500))  # Original description
+    merchant_name = db.Column(db.String(255))
+    
+    # Categorization (Plaid + Custom)
+    category = db.Column(ARRAY(db.String(100)))  # Plaid categories
+    category_id = db.Column(db.String(50))
+    personal_finance_category_primary = db.Column(db.String(100))
+    personal_finance_category_detailed = db.Column(db.String(100))
+    custom_category = db.Column(db.String(100))  # User override
+    
+    # Cash Flow Classification
+    cash_flow_type = db.Column(db.String(20))  # income, expense, transfer, investment
+    is_recurring = db.Column(db.Boolean, default=False)
+    recurring_stream_id = db.Column(db.String(36), db.ForeignKey('recurring_transactions.id'))
+    
+    # Status
+    pending = db.Column(db.Boolean, default=False)
+    
+    # Location (optional)
+    location_address = db.Column(db.String(255))
+    location_city = db.Column(db.String(100))
+    location_region = db.Column(db.String(50))
+    location_postal_code = db.Column(db.String(20))
+    location_country = db.Column(db.String(50))
+    location_lat = db.Column(db.Numeric(10, 7))
+    location_lon = db.Column(db.Numeric(10, 7))
+    
+    # Metadata
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    __table_args__ = (
+        Index('idx_transactions_user_id', 'user_id'),
+        Index('idx_transactions_date', 'date'),
+        Index('idx_transactions_account_date', 'account_id', 'date'),
+        Index('idx_transactions_cash_flow', 'cash_flow_type'),
+        Index('idx_transactions_category', 'personal_finance_category_primary'),
+    )
+
+
+class RecurringTransaction(db.Model):
+    """
+    Identified recurring transaction streams
+    """
+    __tablename__ = 'recurring_transactions'
+    
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = db.Column(db.String(36), db.ForeignKey('users.id'), nullable=False)
+    account_id = db.Column(db.String(36), db.ForeignKey('accounts.id'), nullable=False)
+    
+    # Stream Details
+    stream_id = db.Column(db.String(255))  # Plaid stream_id if using their recurring
+    description = db.Column(db.String(255))
+    merchant_name = db.Column(db.String(255))
+    
+    # Recurrence Pattern
+    frequency = db.Column(db.String(20))  # weekly, biweekly, monthly, annually
+    average_amount = db.Column(db.Numeric(15, 2))
+    last_amount = db.Column(db.Numeric(15, 2))
+    
+    # Classification
+    is_income = db.Column(db.Boolean, default=False)
+    category = db.Column(db.String(100))
+    is_active = db.Column(db.Boolean, default=True)
+    
+    # Dates
+    first_date = db.Column(db.Date)
+    last_date = db.Column(db.Date)
+    next_expected_date = db.Column(db.Date)
+    
+    # Metadata
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    transactions = db.relationship('Transaction', backref='recurring_stream', lazy='dynamic')
+
+
+class Holding(db.Model):
+    """
+    Investment holdings (stocks, bonds, funds, etc.)
+    """
+    __tablename__ = 'holdings'
+    
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    account_id = db.Column(db.String(36), db.ForeignKey('accounts.id'), nullable=False)
+    user_id = db.Column(db.String(36), db.ForeignKey('users.id'), nullable=False)
+    security_id = db.Column(db.String(36), db.ForeignKey('securities.id'), nullable=False)
+    
+    # Position Details
+    quantity = db.Column(db.Numeric(20, 10))
+    cost_basis = db.Column(db.Numeric(15, 2))
+    institution_price = db.Column(db.Numeric(15, 4))
+    institution_value = db.Column(db.Numeric(15, 2))
+    institution_price_as_of = db.Column(db.Date)
+    iso_currency_code = db.Column(db.String(3), default='USD')
+    
+    # Calculated Fields
+    unrealized_gain_loss = db.Column(db.Numeric(15, 2))
+    unrealized_gain_loss_percent = db.Column(db.Numeric(10, 4))
+    
+    # Metadata
+    last_updated = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    __table_args__ = (
+        Index('idx_holdings_user_id', 'user_id'),
+        Index('idx_holdings_account_id', 'account_id'),
+    )
+
+
+class Security(db.Model):
+    """
+    Security master data (stocks, ETFs, mutual funds, etc.)
+    """
+    __tablename__ = 'securities'
+    
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    security_id = db.Column(db.String(255), unique=True, nullable=False)  # Plaid security_id
+    
+    # Identifiers
+    ticker_symbol = db.Column(db.String(20))
+    cusip = db.Column(db.String(12))
+    isin = db.Column(db.String(20))
+    sedol = db.Column(db.String(10))
+    
+    # Details
+    name = db.Column(db.String(255))
+    type = db.Column(db.String(50))  # equity, etf, mutual fund, fixed income, derivative, cash
+    
+    # Pricing
+    close_price = db.Column(db.Numeric(15, 4))
+    close_price_as_of = db.Column(db.Date)
+    iso_currency_code = db.Column(db.String(3), default='USD')
+    
+    # Classification
+    is_cash_equivalent = db.Column(db.Boolean, default=False)
+    sector = db.Column(db.String(100))
+    industry = db.Column(db.String(100))
+    
+    # Option Details (if derivative)
+    option_contract_type = db.Column(db.String(10))  # call, put
+    option_expiration_date = db.Column(db.Date)
+    option_strike_price = db.Column(db.Numeric(15, 2))
+    option_underlying_ticker = db.Column(db.String(20))
+    
+    # Metadata
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    holdings = db.relationship('Holding', backref='security', lazy='dynamic')
+
+
+class InvestmentTransaction(db.Model):
+    """
+    Investment-specific transactions (buys, sells, dividends, etc.)
+    """
+    __tablename__ = 'investment_transactions'
+    
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    account_id = db.Column(db.String(36), db.ForeignKey('accounts.id'), nullable=False)
+    user_id = db.Column(db.String(36), db.ForeignKey('users.id'), nullable=False)
+    security_id = db.Column(db.String(36), db.ForeignKey('securities.id'))
+    investment_transaction_id = db.Column(db.String(255), unique=True, nullable=False)
+    
+    # Transaction Details
+    date = db.Column(db.Date, nullable=False)
+    name = db.Column(db.String(500))
+    type = db.Column(db.String(50))  # buy, sell, cancel, cash, fee, transfer
+    subtype = db.Column(db.String(50))  # buy, sell, dividend, interest, etc.
+    
+    # Amounts
+    amount = db.Column(db.Numeric(15, 2))
+    price = db.Column(db.Numeric(15, 4))
+    quantity = db.Column(db.Numeric(20, 10))
+    fees = db.Column(db.Numeric(15, 2))
+    iso_currency_code = db.Column(db.String(3), default='USD')
+    
+    # Metadata
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    __table_args__ = (
+        Index('idx_inv_transactions_user_id', 'user_id'),
+        Index('idx_inv_transactions_date', 'date'),
+    )
+
+
+class Liability(db.Model):
+    """
+    Liability/Debt information (credit cards, loans, mortgages)
+    """
+    __tablename__ = 'liabilities'
+    
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    account_id = db.Column(db.String(36), db.ForeignKey('accounts.id'), nullable=False)
+    user_id = db.Column(db.String(36), db.ForeignKey('users.id'), nullable=False)
+    
+    # Liability Type
+    type = db.Column(db.String(50))  # credit, student, mortgage
+    
+    # Credit Card Specific
+    is_overdue = db.Column(db.Boolean)
+    last_payment_amount = db.Column(db.Numeric(15, 2))
+    last_payment_date = db.Column(db.Date)
+    last_statement_balance = db.Column(db.Numeric(15, 2))
+    last_statement_issue_date = db.Column(db.Date)
+    minimum_payment_amount = db.Column(db.Numeric(15, 2))
+    next_payment_due_date = db.Column(db.Date)
+    
+    # Loan Specific
+    interest_rate_percentage = db.Column(db.Numeric(8, 4))
+    interest_rate_type = db.Column(db.String(20))  # fixed, variable
+    origination_date = db.Column(db.Date)
+    origination_principal_amount = db.Column(db.Numeric(15, 2))
+    ytd_interest_paid = db.Column(db.Numeric(15, 2))
+    ytd_principal_paid = db.Column(db.Numeric(15, 2))
+    
+    # Mortgage Specific
+    current_late_fee = db.Column(db.Numeric(15, 2))
+    escrow_balance = db.Column(db.Numeric(15, 2))
+    has_pmi = db.Column(db.Boolean)
+    loan_term = db.Column(db.String(20))  # "30 year", "15 year"
+    loan_type_description = db.Column(db.String(100))
+    maturity_date = db.Column(db.Date)
+    property_address = db.Column(JSON)
+    
+    # Metadata
+    last_updated = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class BalanceSnapshot(db.Model):
+    """
+    Historical balance snapshots for trend analysis
+    """
+    __tablename__ = 'balance_snapshots'
+    
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    account_id = db.Column(db.String(36), db.ForeignKey('accounts.id'), nullable=False)
+    user_id = db.Column(db.String(36), db.ForeignKey('users.id'), nullable=False)
+    
+    snapshot_date = db.Column(db.Date, nullable=False)
+    balance_available = db.Column(db.Numeric(15, 2))
+    balance_current = db.Column(db.Numeric(15, 2))
+    balance_limit = db.Column(db.Numeric(15, 2))
+    
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    __table_args__ = (
+        Index('idx_balance_snapshots_user_date', 'user_id', 'snapshot_date'),
+        db.UniqueConstraint('account_id', 'snapshot_date', name='uq_account_snapshot_date'),
+    )
+
+
+class NetWorthSnapshot(db.Model):
+    """
+    Daily net worth calculations for trend tracking
+    """
+    __tablename__ = 'net_worth_snapshots'
+    
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = db.Column(db.String(36), db.ForeignKey('users.id'), nullable=False)
+    
+    snapshot_date = db.Column(db.Date, nullable=False)
+    
+    # Asset Breakdown
+    total_assets = db.Column(db.Numeric(15, 2))
+    liquid_assets = db.Column(db.Numeric(15, 2))  # Cash, checking, savings
+    investment_assets = db.Column(db.Numeric(15, 2))  # Brokerage, retirement
+    other_assets = db.Column(db.Numeric(15, 2))  # Real estate, etc.
+    
+    # Liability Breakdown
+    total_liabilities = db.Column(db.Numeric(15, 2))
+    credit_card_debt = db.Column(db.Numeric(15, 2))
+    loan_debt = db.Column(db.Numeric(15, 2))
+    mortgage_debt = db.Column(db.Numeric(15, 2))
+    
+    # Calculated
+    net_worth = db.Column(db.Numeric(15, 2))
+    
+    # Change Tracking
+    daily_change = db.Column(db.Numeric(15, 2))
+    daily_change_percent = db.Column(db.Numeric(10, 4))
+    
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    __table_args__ = (
+        Index('idx_net_worth_user_date', 'user_id', 'snapshot_date'),
+        db.UniqueConstraint('user_id', 'snapshot_date', name='uq_user_networth_date'),
+    )
+Module 3: Business Intelligence Engine
+
+# app/services/analytics_engine.py
+
+from decimal import Decimal
+from datetime import datetime, timedelta, date
+from typing import Dict, List, Optional, Tuple
+from sqlalchemy import func, and_, or_, case
+from collections import defaultdict
+import statistics
+
+from app import db
+from app.models.financial_models import (
+    Account, Transaction, Holding, Security, Liability,
+    BalanceSnapshot, NetWorthSnapshot, RecurringTransaction,
+    InvestmentTransaction
+)
+
+
+class NetWorthTracker:
+    """
+    Comprehensive Net Worth & Liquidity Tracking Engine
+    """
+    
+    def __init__(self, user_id: str):
+        self.user_id = user_id
+    
+    def calculate_current_net_worth(self) -> Dict:
+        """
+        Calculate real-time net worth breakdown
+        """
+        accounts = Account.query.filter_by(
+            user_id=self.user_id,
+            is_active=True,
+            include_in_net_worth=True
+        ).all()
+        
+        result = {
+            'total_assets': Decimal('0'),
+            'liquid_assets': Decimal('0'),
+            'investment_assets': Decimal('0'),
+            'other_assets': Decimal('0'),
+            'total_liabilities': Decimal('0'),
+            'credit_card_debt': Decimal('0'),
+            'loan_debt': Decimal('0'),
+            'mortgage_debt': Decimal('0'),
+            'net_worth': Decimal('0'),
+            'accounts_breakdown': [],
+            'asset_allocation': {},
+            'liquidity_ratio': Decimal('0'),
+        }
+        
+        for account in accounts:
+            balance = account.balance_current or Decimal('0')
+            account_info = {
+                'id': account.id,
+                'name': account.name,
+                'type': account.type,
+                'subtype': account.subtype,
+                'balance': float(balance),
+                'is_asset': account.is_asset
+            }
+            result['accounts_breakdown'].append(account_info)
+            
+            if account.is_asset:
+                result['total_assets'] += balance
+                
+                # Classify asset type
+                if account.type == 'depository':
+                    result['liquid_assets'] += balance
+                elif account.type == 'investment':
+                    result['investment_assets'] += balance
+                else:
+                    result['other_assets'] += balance
+            else:
+                # Liabilities (credit cards, loans)
+                result['total_liabilities'] += abs(balance)
+                
+                if account.subtype in ['credit card']:
+                    result['credit_card_debt'] += abs(balance)
+                elif account.subtype in ['mortgage']:
+                    result['mortgage_debt'] += abs(balance)
+                else:
+                    result['loan_debt'] += abs(balance)
+        
+        result['net_worth'] = result['total_assets'] - result['total_liabilities']
+        
+        # Calculate liquidity ratio
+        if result['total_liabilities'] > 0:
+            result['liquidity_ratio'] = result['liquid_assets'] / result['total_liabilities']
+        else:
+            result['liquidity_ratio'] = Decimal('999')  # No liabilities
+        
+        # Asset allocation percentages
+        if result['total_assets'] > 0:
+            result['asset_allocation'] = {
+                'liquid': float(result['liquid_assets'] / result['total_assets'] * 100),
+                'investment': float(result['investment_assets'] / result['total_assets'] * 100),
+                'other': float(result['other_assets'] / result['total_assets'] * 100)
+            }
+        
+        # Convert Decimals to floats for JSON serialization
+        for key in ['total_assets', 'liquid_assets', 'investment_assets', 'other_assets',
+                    'total_liabilities', 'credit_card_debt', 'loan_debt', 'mortgage_debt',
+                    'net_worth', 'liquidity_ratio']:
+            result[key] = float(result[key])
+        
+        return result
+    
+    def get_net_worth_history(self, days: int = 365) -> List[Dict]:
+        """
+        Retrieve historical net worth data for trend analysis
+        """
+        start_date = date.today() - timedelta(days=days)
+        
+        snapshots = NetWorthSnapshot.query.filter(
+            NetWorthSnapshot.user_id == self.user_id,
+            NetWorthSnapshot.snapshot_date >= start_date
+        ).order_by(NetWorthSnapshot.snapshot_date).all()
+        
+        return [{
+            'date': s.snapshot_date.isoformat(),
+            'net_worth': float(s.net_worth or 0),
+            'total_assets': float(s.total_assets or 0),
+            'total_liabilities': float(s.total_liabilities or 0),
+            'liquid_assets': float(s.liquid_assets or 0),
+            'investment_assets': float(s.investment_assets or 0),
+            'daily_change': float(s.daily_change or 0),
+            'daily_change_percent': float(s.daily_change_percent or 0)
+        } for s in snapshots]
+    
+    def calculate_wealth_metrics(self) -> Dict:
+        """
+        Calculate advanced wealth metrics
+        """
+        current = self.calculate_current_net_worth()
+        history = self.get_net_worth_history(days=365)
+        
+        metrics = {
+            'current_net_worth': current['net_worth'],
+            'ytd_change': Decimal('0'),
+            'ytd_change_percent': Decimal('0'),
+            'monthly_average_change': Decimal('0'),
+            'best_month': None,
+            'worst_month': None,
+            'volatility': Decimal('0'),
+            'months_to_goal': None,
+        }
+        
+        if len(history) > 1:
+            # YTD calculations
+            year_start = date(date.today().year, 1, 1)
+            ytd_snapshots = [h for h in history if datetime.fromisoformat(h['date']).date() >= year_start]
+            
+            if ytd_snapshots:
+                metrics['ytd_change'] = current['net_worth'] - ytd_snapshots[0]['net_worth']
+                if ytd_snapshots[0]['net_worth'] != 0:
+                    metrics['ytd_change_percent'] = (metrics['ytd_change'] / ytd_snapshots[0]['net_worth']) * 100
+            
+            # Monthly change analysis
+            monthly_changes = []
+            for i in range(1, len(history)):
+                monthly_changes.append(history[i]['net_worth'] - history[i-1]['net_worth'])
+            
+            if monthly_changes:
+                metrics['monthly_average_change'] = statistics.mean(monthly_changes)
+                metrics['best_month'] = max(monthly_changes)
+                metrics['worst_month'] = min(monthly_changes)
+                if len(monthly_changes) > 1:
+                    metrics['volatility'] = statistics.stdev(monthly_changes)
+        
+        return {k: float(v) if isinstance(v, Decimal) else v for k, v in metrics.items()}
+    
+    def save_daily_snapshot(self) -> NetWorthSnapshot:
+        """
+        Create daily net worth snapshot for historical tracking
+        """
+        today = date.today()
+        
+        # Check if snapshot already exists
+        existing = NetWorthSnapshot.query.filter_by(
+            user_id=self.user_id,
+            snapshot_date=today
+        ).first()
+        
+        if existing:
+            return existing
+        
+        current = self.calculate_current_net_worth()
+        
+        # Get previous day's snapshot for change calculation
+        yesterday = today - timedelta(days=1)
+        previous = NetWorthSnapshot.query.filter_by(
+            user_id=self.user_id,
+            snapshot_date=yesterday
+        ).first()
+        
+        daily_change = Decimal('0')
+        daily_change_percent = Decimal('0')
+        
+        if previous and previous.net_worth:
+            daily_change = Decimal(str(current['net_worth'])) - previous.net_worth
+            if previous.net_worth != 0:
+                daily_change_percent = (daily_change / previous.net_worth) * 100
+        
+        snapshot = NetWorthSnapshot(
+            user_id=self.user_id,
+            snapshot_date=today,
+            total_assets=current['total_assets'],
+            liquid_assets=current['liquid_assets'],
+            investment_assets=current['investment_assets'],
+            other_assets=current['other_assets'],
+            total_liabilities=current['total_liabilities'],
+            credit_card_debt=current['credit_card_debt'],
+            loan_debt=current['loan_debt'],
+            mortgage_debt=current['mortgage_debt'],
+            net_worth=current['net_worth'],
+            daily_change=daily_change,
+            daily_change_percent=daily_change_percent
+        )
+        
+        db.session.add(snapshot)
+        db.session.commit()
+        
+        return snapshot
+
+
+class CashFlowEngine:
+    """
+    Operational Cash Flow Automation Engine
+    """
+    
+    def __init__(self, user_id: str):
+        self.user_id = user_id
+    
+    def classify_transaction(self, transaction: Transaction) -> str:
+        """
+        Classify transaction into cash flow categories
+        """
+        amount = transaction.amount
+        category = transaction.personal_finance_category_primary or ''
+        
+        # Plaid returns negative amounts for income (money flowing in)
+        if amount < 0:
+            return 'income'
+        
+        # Check for transfer patterns
+        transfer_keywords = ['transfer', 'xfer', 'payment from', 'deposit']
+        if any(kw in (transaction.name or '').lower() for kw in transfer_keywords):
+            return 'transfer'
+        
+        # Investment-related
+        investment_categories = ['TRANSFER_IN', 'TRANSFER_OUT', 'INVESTMENT']
+        if category in investment_categories:
+            return 'investment'
+        
+        return 'expense'
+    
+    def analyze_cash_flow(self, start_date: date = None, end_date: date = None) -> Dict:
+        """
+        Comprehensive cash flow analysis
+        """
+        if not end_date:
+            end_date = date.today()
+        if not start_date:
+            start_date = end_date - timedelta(days=30)
+        
+        transactions = Transaction.query.filter(
+            Transaction.user_id == self.user_id,
+            Transaction.date >= start_date,
+            Transaction.date <= end_date,
+            Transaction.pending == False
+        ).all()
+        
+        result = {
+            'period': {
+                'start': start_date.isoformat(),
+                'end': end_date.isoformat(),
+                'days': (end_date - start_date).days
+            },
+            'summary': {
+                'total_income': Decimal('0'),
+                'total_expenses': Decimal('0'),
+                'total_transfers': Decimal('0'),
+                'net_cash_flow': Decimal('0'),
+                'transaction_count': len(transactions)
+            },
+            'income_breakdown': defaultdict(Decimal),
+            'expense_breakdown': defaultdict(Decimal),
+            'daily_cash_flow': defaultdict(lambda: {'income': Decimal('0'), 'expenses': Decimal('0')}),
+            'top_expenses': [],
+            'top_income_sources': [],
+        }
+        
+        expense_by_merchant = defaultdict(Decimal)
+        income_by_source = defaultdict(Decimal)
+        
+        for txn in transactions:
+            amount = txn.amount
+            category = txn.personal_finance_category_primary or 'UNCATEGORIZED'
+            date_key = txn.date.isoformat()
+            
+            flow_type = self.classify_transaction(txn)
+            txn.cash_flow_type = flow_type  # Update classification
+            
+            if flow_type == 'income':
+                abs_amount = abs(amount)
+                result['summary']['total_income'] += abs_amount
+                result['income_breakdown'][category] += abs_amount
+                result['daily_cash_flow'][date_key]['income'] += abs_amount
+                income_by_source[txn.merchant_name or txn.name] += abs_amount
+            
+            elif flow_type == 'expense':
+                result['summary']['total_expenses'] += amount
+                result['expense_breakdown'][category] += amount
+                result['daily_cash_flow'][date_key]['expenses'] += amount
+                expense_by_merchant[txn.merchant_name or txn.name] += amount
+            
+            elif flow_type == 'transfer':
+                result['summary']['total_transfers'] += abs(amount)
+        
+        result['summary']['net_cash_flow'] = (
+            result['summary']['total_income'] - result['summary']['total_expenses']
+        )
+        
+        # Top expenses
+        result['top_expenses'] = sorted(
+            [{'merchant': k, 'amount': float(v)} for k, v in expense_by_merchant.items()],
+            key=lambda x: x['amount'],
+            reverse=True
+        )[:10]
+        
+        # Top income sources
+        result['top_income_sources'] = sorted(
+            [{'source': k, 'amount': float(v)} for k, v in income_by_source.items()],
+            key=lambda x: x['amount'],
+            reverse=True
+        )[:10]
+        
+        # Convert to serializable format
+        result['income_breakdown'] = {k: float(v) for k, v in result['income_breakdown'].items()}
+        result['expense_breakdown'] = {k: float(v) for k, v in result['expense_breakdown'].items()}
+        result['daily_cash_flow'] = {
+            k: {'income': float(v['income']), 'expenses': float(v['expenses'])}
+            for k, v in result['daily_cash_flow'].items()
+        }
+        
+        for key in result['summary']:
+            if isinstance(result['summary'][key], Decimal):
+                result['summary'][key] = float(result['summary'][key])
+        
+        return result
+    
+    def identify_recurring_transactions(self) -> List[Dict]:
+        """
+        Identify and analyze recurring transaction patterns
+        """
+        # Get last 90 days of transactions
+        start_date = date.today() - timedelta(days=90)
+        
+        transactions = Transaction.query.filter(
+            Transaction.user_id == self.user_id,
+            Transaction.date >= start_date
+        ).order_by(Transaction.date).all()
+        
+        # Group by merchant and approximate amount
+        patterns = defaultdict(list)
+        
+        for txn in transactions:
+            key = (txn.merchant_name or txn.name, round(abs(txn.amount), 0))
+            patterns[key].append(txn)
+        
+        recurring = []
+        
+        for (merchant, approx_amount), txns in patterns.items():
+            if len(txns) >= 2:
+                # Analyze frequency
+                dates = sorted([t.date for t in txns])
+                intervals = [(dates[i+1] - dates[i]).days for i in range(len(dates)-1)]
+                
+                if intervals:
+                    avg_interval = statistics.mean(intervals)
+                    
+                    # Determine frequency
+                    if 25 <= avg_interval <= 35:
+                        frequency = 'monthly'
+                    elif 12 <= avg_interval <= 16:
+                        frequency = 'biweekly'
+                    elif 5 <= avg_interval <= 9:
+                        frequency = 'weekly'
+                    elif 350 <= avg_interval <= 380:
+                        frequency = 'annually'
+                    else:
+                        continue  # Not a clear recurring pattern
+                    
+                    amounts = [abs(t.amount) for t in txns]
+                    
+                    recurring.append({
+                        'merchant': merchant,
+                        'frequency': frequency,
+                        'average_amount': float(statistics.mean(amounts)),
+                        'last_amount': float(amounts[-1]),
+                        'occurrence_count': len(txns),
+                        'first_date': dates[0].isoformat(),
+                        'last_date': dates[-1].isoformat(),
+                        'next_expected': (dates[-1] + timedelta(days=int(avg_interval))).isoformat(),
+                        'is_income': txns[0].amount < 0,
+                        'category': txns[0].personal_finance_category_primary
+                    })
+        
+        return sorted(recurring, key=lambda x: x['average_amount'], reverse=True)
+    
+    def forecast_cash_flow(self, days: int = 30) -> Dict:
+        """
+        Forecast future cash flow based on recurring patterns and historical data
+        """
+        recurring = self.identify_recurring_transactions()
+        
+        # Get historical averages
+        historical = self.analyze_cash_flow(
+            start_date=date.today() - timedelta(days=90),
+            end_date=date.today()
+        )
+        
+        daily_avg_income = historical['summary']['total_income'] / 90
+        daily_avg_expenses = historical['summary']['total_expenses'] / 90
+        
+        forecast = {
+            'period_days': days,
+            'expected_income': [],
+            'expected_expenses': [],
+            'projected_totals': {
+                'income': float(daily_avg_income * days),
+                'expenses': float(daily_avg_expenses * days),
+                'net': float((daily_avg_income - daily_avg_expenses) * days)
+            },
+            'known_upcoming': []
+        }
+        
+        # Add known recurring transactions
+        for rec in recurring:
+            next_date = datetime.fromisoformat(rec['next_expected']).date()
+            if next_date <= date.today() + timedelta(days=days):
+                forecast['known_upcoming'].append({
+                    'date': rec['next_expected'],
+                    'merchant': rec['merchant'],
+                    'amount': rec['average_amount'],
+                    'is_income': rec['is_income']
+                })
+        
+        return forecast
+    
+    def get_spending_insights(self) -> Dict:
+        """
+        Generate actionable spending insights
+        """
+        current_month = self.analyze_cash_flow(
+            start_date=date.today().replace(day=1),
+            end_date=date.today()
+        )
+        
+        last_month_start = (date.today().replace(day=1) - timedelta(days=1)).replace(day=1)
+        last_month_end = date.today().replace(day=1) - timedelta(days=1)
+        
+        last_month = self.analyze_cash_flow(
+            start_date=last_month_start,
+            end_date=last_month_end
+        )
+        
+        insights = {
+            'spending_trend': 'stable',
+            'savings_rate': 0,
+            'category_changes': [],
+            'recommendations': []
+        }
+        
+        # Calculate savings rate
+        if current_month['summary']['total_income'] > 0:
+            insights['savings_rate'] = (
+                (current_month['summary']['total_income'] - current_month['summary']['total_expenses'])
+                / current_month['summary']['total_income'] * 100
+            )
+        
+        # Compare spending by category
+        for category in current_month['expense_breakdown']:
+            current = current_month['expense_breakdown'].get(category, 0)
+            previous = last_month['expense_breakdown'].get(category, 0)
+            
+            if previous > 0:
+                change_pct = ((current - previous) / previous) * 100
+                if abs(change_pct) > 20:
+                    insights['category_changes'].append({
+                        'category': category,
+                        'current': current,
+                        'previous': previous,
+                        'change_percent': change_pct
+                    })
+        
+        # Generate recommendations
+        if insights['savings_rate'] < 20:
+            insights['recommendations'].append({
+                'type': 'savings',
+                'message': 'Consider increasing your savings rate to at least 20%',
+                'priority': 'high'
+            })
+        
+        # Find largest expense categories
+        top_expenses = sorted(
+            current_month['expense_breakdown'].items(),
+            key=lambda x: x[1],
+            reverse=True
+        )[:3]
+        
+        for category, amount in top_expenses:
+            if amount > current_month['summary']['total_income'] * 0.3:
+                insights['recommendations'].append({
+                    'type': 'budget',
+                    'message': f'{category} spending is over 30% of income. Consider setting a budget.',
+                    'priority': 'medium',
+                    'category': category,
+                    'amount': amount
+                })
+        
+        return insights
+
+
+class PortfolioManager:
+    """
+    Active Portfolio Management Engine
+    """
+    
+    def __init__(self, user_id: str):
+        self.user_id = user_id
+    
+    def get_portfolio_summary(self) -> Dict:
+        """
+        Comprehensive portfolio summary with allocation analysis
+        """
+        holdings = Holding.query.filter_by(user_id=self.user_id).all()
+        
+        if not holdings:
+            return {
+                'total_value': 0,
+                'total_cost_basis': 0,
+                'total_gain_loss': 0,
+                'total_gain_loss_percent': 0,
+                'holdings': [],
+                'allocation': {}
+            }
+        
+        result = {
+            'total_value': Decimal('0'),
+            'total_cost_basis': Decimal('0'),
+            'holdings': [],
+            'allocation_by_type': defaultdict(Decimal),
+            'allocation_by_sector': defaultdict(Decimal),
+            'top_holdings': [],
+            'performance': {}
+        }
+        
+        for holding in holdings:
+            security = holding.security
+            value = holding.institution_value or Decimal('0')
+            cost = holding.cost_basis or Decimal('0')
+            
+            result['total_value'] += value
+            result['total_cost_basis'] += cost
+            
+            holding_info = {
+                'id': holding.id,
+                'security_id': security.id if security else None,
+                'ticker': security.ticker_symbol if security else 'N/A',
+                'name': security.name if security else 'Unknown',
+                'type': security.type if security else 'unknown',
+                'quantity': float(holding.quantity or 0),
+                'price': float(holding.institution_price or 0),
+                'value': float(value),
+                'cost_basis': float(cost),
+                'gain_loss': float(value - cost),
+                'gain_loss_percent': float((value - cost) / cost * 100) if cost else 0
+            }
+            
+            result['holdings'].append(holding_info)
+            
+            if security:
+                result['allocation_by_type'][security.type] += value
+                if security.sector:
+                    result['allocation_by_sector'][security.sector] += value
+        
+        # Calculate totals
+        result['total_gain_loss'] = result['total_value'] - result['total_cost_basis']
+        if result['total_cost_basis'] > 0:
+            result['total_gain_loss_percent'] = (result['total_gain_loss'] / result['total_cost_basis']) * 100
+        else:
+            result['total_gain_loss_percent'] = Decimal('0')
+        
+        # Calculate allocation percentages
+        result['allocation_by_type'] = {
+            k: float(v / result['total_value'] * 100) if result['total_value'] else 0
+            for k, v in result['allocation_by_type'].items()
+        }
+        
+        result['allocation_by_sector'] = {
+            k: float(v / result['total_value'] * 100) if result['total_value'] else 0
+            for k, v in result['allocation_by_sector'].items()
+        }
+        
+        # Top holdings by value
+        result['top_holdings'] = sorted(
+            result['holdings'],
+            key=lambda x: x['value'],
+            reverse=True
+        )[:10]
+        
+        # Convert Decimals
+        result['total_value'] = float(result['total_value'])
+        result['total_cost_basis'] = float(result['total_cost_basis'])
+        result['total_gain_loss'] = float(result['total_gain_loss'])
+        result['total_gain_loss_percent'] = float(result['total_gain_loss_percent'])
+        
+        return result
+    
+    def get_investment_transactions(self, days: int = 90) -> List[Dict]:
+        """
+        Get recent investment transactions
+        """
+        start_date = date.today() - timedelta(days=days)
+        
+        transactions = InvestmentTransaction.query.filter(
+            InvestmentTransaction.user_id == self.user_id,
+            InvestmentTransaction.date >= start_date
+        ).order_by(InvestmentTransaction.date.desc()).all()
+        
+        return [{
+            'id': t.id,
+            'date': t.date.isoformat(),
+            'type': t.type,
+            'subtype': t.subtype,
+            'name': t.name,
+            'ticker': t.security.ticker_symbol if t.security else 'N/A',
+            'quantity': float(t.quantity or 0),
+            'price': float(t.price or 0),
+            'amount': float(t.amount or 0),
+            'fees': float(t.fees or 0)
+        } for t in transactions]
+    
+    def analyze_portfolio_risk(self) -> Dict:
+        """
+        Portfolio risk analysis and diversification metrics
+        """
+        portfolio = self.get_portfolio_summary()
+        
+        risk_metrics = {
+            'diversification_score': 0,
+            'concentration_risk': 'low',
+            'type_diversity': 0,
+            'sector_diversity': 0,
+            'warnings': [],
+            'recommendations': []
+        }
+        
+        if not portfolio['holdings']:
+            return risk_metrics
+        
+        # Check concentration (single holding > 20% of portfolio)
+        for holding in portfolio['top_holdings']:
+            pct = (holding['value'] / portfolio['total_value'] * 100) if portfolio['total_value'] else 0
+            if pct > 20:
+                risk_metrics['concentration_risk'] = 'high'
+                risk_metrics['warnings'].append({
+                    'type': 'concentration',
+                    'message': f"{holding['ticker']} represents {pct:.1f}% of portfolio",
+                    'holding': holding['ticker']
+                })
+            elif pct > 10:
+                if risk_metrics['concentration_risk'] != 'high':
+                    risk_metrics['concentration_risk'] = 'medium'
+        
+        # Type diversity (number of different asset types)
+        type_count = len(portfolio['allocation_by_type'])
+        risk_metrics['type_diversity'] = min(type_count / 5 * 100, 100)  # 5 types = 100%
+        
+        # Sector diversity
+        sector_count = len(portfolio['allocation_by_sector'])
+        risk_metrics['sector_diversity'] = min(sector_count / 10 * 100, 100)  # 10 sectors = 100%
+        
+        # Overall diversification score
+        risk_metrics['diversification_score'] = (
+            risk_metrics['type_diversity'] * 0.4 +
+            risk_metrics['sector_diversity'] * 0.4 +
+            (100 if risk_metrics['concentration_risk'] == 'low' else 
+             50 if risk_metrics['concentration_risk'] == 'medium' else 0) * 0.2
+        )
+        
+        # Recommendations
+        if type_count < 3:
+            risk_metrics['recommendations'].append({
+                'type': 'diversification',
+                'message': 'Consider adding more asset classes (bonds, REITs, international)',
+                'priority': 'high'
+            })
+        
+        if 'cash' not in portfolio['allocation_by_type'] or portfolio['allocation_by_type'].get('cash', 0) < 5:
+            risk_metrics['recommendations'].append({
+                'type': 'liquidity',
+                'message': 'Consider maintaining a cash reserve of at least 5%',
+                'priority': 'medium'
+            })
+        
+        return risk_metrics
+    
+    def get_dividend_income(self, days: int = 365) -> Dict:
+        """
+        Analyze dividend income from portfolio
+        """
+        start_date = date.today() - timedelta(days=days)
+        
+        dividends = InvestmentTransaction.query.filter(
+            InvestmentTransaction.user_id == self.user_id,
+            InvestmentTransaction.date >= start_date,
+            InvestmentTransaction.subtype == 'dividend'
+        ).all()
+        
+        result = {
+            'total_dividends': Decimal('0'),
+            'by_security': defaultdict(Decimal),
+            'by_month': defaultdict(Decimal),
+            'projected_annual': Decimal('0')
+        }
+        
+        for div in dividends:
+            amount = abs(div.amount or Decimal('0'))
+            result['total_dividends'] += amount
+            
+            ticker = div.security.ticker_symbol if div.security else 'Unknown'
+            result['by_security'][ticker] += amount
+            
+            month_key = div.date.strftime('%Y-%m')
+            result['by_month'][month_key] += amount
+        
+        # Project annual dividends
+        if days < 365:
+            result['projected_annual'] = result['total_dividends'] * (365 / days)
+        else:
+            result['projected_annual'] = result['total_dividends']
+        
+        return {
+            'total_dividends': float(result['total_dividends']),
+            'by_security': {k: float(v) for k, v in result['by_security'].items()},
+            'by_month': {k: float(v) for k, v in result['by_month'].items()},
+            'projected_annual': float(result['projected_annual'])
+        }
+Module 4: API Routes
+
+# app/routes/plaid_routes.py
+
+from flask import Blueprint, request, jsonify, current_app
+from flask_login import login_required, current_user
+from app.services.plaid_service import PlaidService
+from app.services.data_sync_service import DataSyncService
+from app.models.financial_models import PlaidItem
+from app import db
+
+plaid_bp = Blueprint('plaid', __name__, url_prefix='/api/plaid')
+
+
+@plaid_bp.route('/create-link-token', methods=['POST'])
+@login_required
+def create_link_token():
+    """
+    Create a Plaid Link token for the current user
+    """
+    try:
+        plaid_service = PlaidService()
+        response = plaid_service.create_link_token(current_user.id)
+        return jsonify(response), 200
+    except Exception as e:
+        current_app.logger.error(f"Error creating link token: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@plaid_bp.route('/exchange-token', methods=['POST'])
+@login_required
+def exchange_token():
+    """
+    Exchange public token for access token after Link completion
+    """
+    data = request.get_json()
+    public_token = data.get('public_token')
+    institution = data.get('institution', {})
+    
+    if not public_token:
+        return jsonify({'error': 'public_token required'}), 400
+    
+    try:
+        plaid_service = PlaidService()
+        result = plaid_service.exchange_public_token(public_token)
+        
+        # Store the Item
+        plaid_item = PlaidItem(
+            user_id=current_user.id,
+            item_id=result['item_id'],
+            access_token=result['access_token'],  # Should encrypt in production
+            institution_id=institution.get('institution_id'),
+            institution_name=institution.get('name'),
+            status='active'
+        )
+        
+        db.session.add(plaid_item)
+        db.session.commit()
+        
+        # Trigger initial data sync
+        sync_service = DataSyncService()
+        sync_service.sync_item(plaid_item.id)
+        
+        return jsonify({
+            'success': True,
+            'item_id': plaid_item.id,
+            'institution_name': plaid_item.institution_name
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Error exchanging token: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@plaid_bp.route('/items', methods=['GET'])
+@login_required
+def get_items():
+    """
+    Get all linked financial institutions for current user
+    """
+    items = PlaidItem.query.filter_by(
+        user_id=current_user.id
+    ).all()
+    
+    return jsonify([{
+        'id': item.id,
+        'institution_name': item.institution_name,
+        'institution_id': item.institution_id,
+        'status': item.status,
+        'last_synced': item.last_synced_at.isoformat() if item.last_synced_at else None,
+        'account_count': item.accounts.count()
+    } for item in items]), 200
+
+
+@plaid_bp.route('/items/<item_id>/sync', methods=['POST'])
+@login_required
+def sync_item(item_id):
+    """
+    Manually trigger a data sync for a specific item
+    """
+    item = PlaidItem.query.filter_by(
+        id=item_id,
+        user_id=current_user.id
+    ).first_or_404()
+    
+    try:
+        sync_service = DataSyncService()
+        result = sync_service.sync_item(item.id)
+        return jsonify(result), 200
+    except Exception as e:
+        current_app.logger.error(f"Error syncing item: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@plaid_bp.route('/items/<item_id>', methods=['DELETE'])
+@login_required
+def remove_item(item_id):
+    """
+    Remove a linked institution
+    """
+    item = PlaidItem.query.filter_by(
+        id=item_id,
+        user_id=current_user.id
+    ).first_or_404()
+    
+    try:
+        # Optionally remove from Plaid as well
+        plaid_service = PlaidService()
+        plaid_service.remove_item(item.access_token)
+        
+        db.session.delete(item)
+        db.session.commit()
+        
+        return jsonify({'success': True}), 200
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Error removing item: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@plaid_bp.route('/webhook', methods=['POST'])
+def webhook():
+    """
+    Handle Plaid webhooks for real-time updates
+    """
+    data = request.get_json()
+    webhook_type = data.get('webhook_type')
+    webhook_code = data.get('webhook_code')
+    item_id = data.get('item_id')
+    
+    current_app.logger.info(f"Received webhook: {webhook_type}/{webhook_code} for {item_id}")
+    
+    try:
+        if webhook_type == 'TRANSACTIONS':
+            if webhook_code in ['INITIAL_UPDATE', 'HISTORICAL_UPDATE', 'DEFAULT_UPDATE']:
+                # Sync transactions
+                item = PlaidItem.query.filter_by(item_id=item_id).first()
+                if item:
+                    sync_service = DataSyncService()
+                    sync_service.sync_transactions(item.id)
+        
+        elif webhook_type == 'INVESTMENTS_TRANSACTIONS':
+            if webhook_code == 'DEFAULT_UPDATE':
+                item = PlaidItem.query.filter_by(item_id=item_id).first()
+                if item:
+                    sync_service = DataSyncService()
+                    sync_service.sync_investments(item.id)
+        
+        elif webhook_type == 'ITEM':
+            if webhook_code == 'ERROR':
+                # Mark item as having an error
+                item = PlaidItem.query.filter_by(item_id=item_id).first()
+                if item:
+                    item.status = 'error'
+                    db.session.commit()
+            
+            elif webhook_code == 'PENDING_EXPIRATION':
+                item = PlaidItem.query.filter_by(item_id=item_id).first()
+                if item:
+                    item.status = 'pending_expiration'
+                    db.session.commit()
+                    # TODO: Notify user to re-authenticate
+        
+        return jsonify({'received': True}), 200
+        
+    except Exception as e:
+        current_app.logger.error(f"Webhook processing error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# app/routes/dashboard_routes.py
+
+from flask import Blueprint, request, jsonify
+from flask_login import login_required, current_user
+from app.services.analytics_engine import NetWorthTracker, CashFlowEngine, PortfolioManager
+from app.models.financial_models import Account, Transaction
+from datetime import datetime, date, timedelta
+
+dashboard_bp = Blueprint('dashboard', __name__, url_prefix='/api/dashboard')
+
+
+@dashboard_bp.route('/overview', methods=['GET'])
+@login_required
+def get_overview():
+    """
+    Get complete dashboard overview data
+    """
+    net_worth_tracker = NetWorthTracker(current_user.id)
+    cash_flow_engine = CashFlowEngine(current_user.id)
+    portfolio_manager = PortfolioManager(current_user.id)
+    
+    return jsonify({
+        'net_worth': net_worth_tracker.calculate_current_net_worth(),
+        'cash_flow': cash_flow_engine.analyze_cash_flow(
+            start_date=date.today().replace(day=1),
+            end_date=date.today()
+        ),
+        'portfolio': portfolio_manager.get_portfolio_summary(),
+        'recent_transactions': get_recent_transactions_helper(current_user.id, limit=10)
+    }), 200
+
+
+@dashboard_bp.route('/net-worth', methods=['GET'])
+@login_required
+def get_net_worth():
+    """
+    Get detailed net worth information
+    """
+    tracker = NetWorthTracker(current_user.id)
+    
+    days = request.args.get('days', 365, type=int)
+    
+    return jsonify({
+        'current': tracker.calculate_current_net_worth(),
+        'history': tracker.get_net_worth_history(days=days),
+        'metrics': tracker.calculate_wealth_metrics()
+    }), 200
+
+
+@dashboard_bp.route('/cash-flow', methods=['GET'])
+@login_required
+def get_cash_flow():
+    """
+    Get cash flow analysis
+    """
+    engine = CashFlowEngine(current_user.id)
+    
+    # Parse date parameters
+    start_date_str = request.args.get('start_date')
+    end_date_str = request.args.get('end_date')
+    
+    if start_date_str:
+        start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+    else:
+        start_date = date.today().replace(day=1)
+    
+    if end_date_str:
+        end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
+    else:
+        end_date = date.today()
+    
+    return jsonify({
+        'analysis': engine.analyze_cash_flow(start_date, end_date),
+        'recurring': engine.identify_recurring_transactions(),
+        'forecast': engine.forecast_cash_flow(days=30),
+        'insights': engine.get_spending_insights()
+    }), 200
+
+
+@dashboard_bp.route('/portfolio', methods=['GET'])
+@login_required
+def get_portfolio():
+    """
+    Get portfolio information
+    """
+    manager = PortfolioManager(current_user.id)
+    
+    days = request.args.get('days', 90, type=int)
+    
+    return jsonify({
+        'summary': manager.get_portfolio_summary(),
+        'transactions': manager.get_investment_transactions(days=days),
+        'risk_analysis': manager.analyze_portfolio_risk(),
+        'dividends': manager.get_dividend_income()
+    }), 200
+
+
+@dashboard_bp.route('/accounts', methods=['GET'])
+@login_required
+def get_accounts():
+    """
+    Get all accounts with balances
+    """
+    accounts = Account.query.filter_by(
+        user_id=current_user.id,
+        is_active=True
+    ).all()
+    
+    return jsonify([{
+        'id': a.id,
+        'name': a.name,
+        'official_name': a.official_name,
+        'type': a.type,
+        'subtype': a.subtype,
+        'mask': a.mask,
+        'balance_available': float(a.balance_available or 0),
+        'balance_current': float(a.balance_current or 0),
+        'balance_limit': float(a.balance_limit or 0),
+        'is_asset': a.is_asset,
+        'is_liquid': a.is_liquid,
+        'include_in_net_worth': a.include_in_net_worth,
+        'last_updated': a.last_balance_update.isoformat() if a.last_balance_update else None
+    } for a in accounts]), 200
+
+
+@dashboard_bp.route('/accounts/<account_id>', methods=['PATCH'])
+@login_required
+def update_account(account_id):
+    """
+    Update account settings (classification, inclusion in net worth, etc.)
+    """
+    account = Account.query.filter_by(
+        id=account_id,
+        user_id=current_user.id
+    ).first_or_404()
+    
+    data = request.get_json()
+    
+    if 'is_asset' in data:
+        account.is_asset = data['is_asset']
+    if 'is_liquid' in data:
+        account.is_liquid = data['is_liquid']
+    if 'include_in_net_worth' in data:
+        account.include_in_net_worth = data['include_in_net_worth']
+    if 'custom_category' in data:
+        account.custom_category = data['custom_category']
+    
+    db.session.commit()
+    
+    return jsonify({'success': True}), 200
+
+
+@dashboard_bp.route('/transactions', methods=['GET'])
+@login_required
+def get_transactions():
+    """
+    Get transactions with filtering and pagination
+    """
+    # Pagination
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 50, type=int)
+    
+    # Filters
+    account_id = request.args.get('account_id')
+    category = request.args.get('category')
+    start_date = request.args.get('start_date')
+    end_date = request.args.get('end_date')
+    search = request.args.get('search')
+    
+    query = Transaction.query.filter_by(user_id=current_user.id)
+    
+    if account_id:
+        query = query.filter_by(account_id=account_id)
+    
+    if category:
+        query = query.filter_by(personal_finance_category_primary=category)
+    
+    if start_date:
+        query = query.filter(Transaction.date >= datetime.strptime(start_date, '%Y-%m-%d').date())
+    
+    if end_date:
+        query = query.filter(Transaction.date <= datetime.strptime(end_date, '%Y-%m-%d').date())
+    
+    if search:
+        query = query.filter(
+            Transaction.name.ilike(f'%{search}%') |
+            Transaction.merchant_name.ilike(f'%{search}%')
+        )
+    
+    query = query.order_by(Transaction.date.desc())
+    
+    pagination = query.paginate(page=page, per_page=per_page)
+    
+    return jsonify({
+        'transactions': [{
+            'id': t.id,
+            'date': t.date.isoformat(),
+            'name': t.name,
+            'merchant_name': t.merchant_name,
+            'amount': float(t.amount),
+            'category': t.personal_finance_category_primary,
+            'category_detailed': t.personal_finance_category_detailed,
+            'account_name': t.account.name if t.account else None,
+            'pending': t.pending,
+            'cash_flow_type': t.cash_flow_type
+        } for t in pagination.items],
+        'pagination': {
+            'page': pagination.page,
+            'per_page': pagination.per_page,
+            'total_pages': pagination.pages,
+            'total_items': pagination.total
+        }
+    }), 200
+
+
+def get_recent_transactions_helper(user_id: str, limit: int = 10):
+    """Helper to get recent transactions"""
+    transactions = Transaction.query.filter_by(
+        user_id=user_id
+    ).order_by(Transaction.date.desc()).limit(limit).all()
+    
+    return [{
+        'id': t.id,
+        'date': t.date.isoformat(),
+        'name': t.name,
+        'merchant_name': t.merchant_name,
+        'amount': float(t.amount),
+        'category': t.personal_finance_category_primary
+    } for t in transactions]
+Module 5: Data Synchronization Service
+
+# app/services/data_sync_service.py
+
+from datetime import datetime, timedelta
+from decimal import Decimal
+from app import db
+from app.services.plaid_service import PlaidService
+from app.models.financial_models import (
+    PlaidItem, Account, Transaction, Holding, Security,
+    InvestmentTransaction, Liability, BalanceSnapshot
+)
+
+
+class DataSyncService:
+    """
+    Service for synchronizing data from Plaid to local database
+    """
+    
+    def __init__(self):
+        self.plaid_service = PlaidService()
+    
+    def sync_item(self, plaid_item_id: str) -> dict:
+        """
+        Full sync for a Plaid Item (accounts, transactions, investments, liabilities)
+        """
+        item = PlaidItem.query.get(plaid_item_id)
+        if not item:
+            raise ValueError(f"PlaidItem {plaid_item_id} not found")
+        
+        results = {
+            'accounts_synced': 0,
+            'transactions_synced': 0,
+            'holdings_synced': 0,
+            'investment_transactions_synced': 0,
+            'liabilities_synced': 0,
+            'errors': []
+        }
+        
+        try:
+            # Sync accounts and balances
+            results['accounts_synced'] = self._sync_accounts(item)
+        except Exception as e:
+            results['errors'].append(f"Accounts sync error: {str(e)}")
+        
+        try:
+            # Sync transactions
+            results['transactions_synced'] = self._sync_transactions(item)
+        except Exception as e:
+            results['errors'].append(f"Transactions sync error: {str(e)}")
+        
+        try:
+            # Sync investments
+            holdings, inv_txns = self._sync_investments(item)
+            results['holdings_synced'] = holdings
+            results['investment_transactions_synced'] = inv_txns
+        except Exception as e:
+            results['errors'].append(f"Investments sync error: {str(e)}")
+        
+        try:
+            # Sync liabilities
+            results['liabilities_synced'] = self._sync_liabilities(item)
+        except Exception as e:
+            results['errors'].append(f"Liabilities sync error: {str(e)}")
+        
+        # Update last sync time
+        item.last_synced_at = datetime.utcnow()
+        db.session.commit()
+        
+        return results
+    
+    def _sync_accounts(self, item: PlaidItem) -> int:
+        """Sync accounts and balances"""
+        data = self.plaid_service.get_accounts_balance(item.access_token)
+        
+        synced = 0
+        for account_data in data.get('accounts', []):
+            account = Account.query.filter_by(
+                account_id=account_data['account_id']
+            ).first()
+            
+            if not account:
+                account = Account(
+                    plaid_item_id=item.id,
+                    user_id=item.user_id,
+                    account_id=account_data['account_id']
+                )
+                db.session.add(account)
+            
+            # Update account details
+            account.name = account_data.get('name')
+            account.official_name = account_data.get('official_name')
+            account.mask = account_data.get('mask')
+            account.type = account_data.get('type')
+            account.subtype = account_data.get('subtype')
+            
+            # Update balances
+            balances = account_data.get('balances', {})
+            account.balance_available = Decimal(str(balances.get('available') or 0))
+            account.balance_current = Decimal(str(balances.get('current') or 0))
+            account.balance_limit = Decimal(str(balances.get('limit'))) if balances.get('limit') else None
+            account.iso_currency_code = balances.get('iso_currency_code', 'USD')
+            account.last_balance_update = datetime.utcnow()
+            
+            # Set asset/liquid flags based on type
+            account.is_asset = account.type != 'credit'
+            account.is_liquid = account.type == 'depository' and account.subtype in ['checking', 'savings']
+            
+            # Create balance snapshot
+            self._create_balance_snapshot(account)
+            
+            synced += 1
+        
+        db.session.commit()
+        return synced
+    
+    def _sync_transactions(self, item: PlaidItem) -> int:
+        """Sync transactions"""
+        # Get accounts for this item
+        accounts = Account.query.filter_by(plaid_item_id=item.id).all()
+        account_map = {a.account_id: a.id for a in accounts}
+        
+        # Fetch last 90 days of transactions
+        data = self.plaid_service.get_transactions(
+            item.access_token,
+            start_date=datetime.now() - timedelta(days=90),
+            end_date=datetime.now()
+        )
+        
+        synced = 0
+        for txn_data in data.get('transactions', []):
+            transaction = Transaction.query.filter_by(
+                transaction_id=txn_data['transaction_id']
+            ).first()
+            
+            if not transaction:
+                transaction = Transaction(
+                    account_id=account_map.get(txn_data['account_id']),
+                    user_id=item.user_id,
+                    transaction_id=txn_data['transaction_id']
+                )
+                db.session.add(transaction)
+            
+            # Update transaction details
+            transaction.amount = Decimal(str(txn_data.get('amount', 0)))
+            transaction.iso_currency_code = txn_data.get('iso_currency_code', 'USD')
+            transaction.date = datetime.strptime(txn_data['date'], '%Y-%m-%d').date()
+            transaction.name = txn_data.get('name')
+            transaction.merchant_name = txn_data.get('merchant_name')
+            transaction.pending = txn_data.get('pending', False)
+            
+            # Categories
+            transaction.category = txn_data.get('category', [])
+            transaction.category_id = txn_data.get('category_id')
+            
+            pfc = txn_data.get('personal_finance_category', {})
+            transaction.personal_finance_category_primary = pfc.get('primary')
+            transaction.personal_finance_category_detailed = pfc.get('detailed')
+            
+            # Location
+            location = txn_data.get('location', {})
+            transaction.location_city = location.get('city')
+            transaction.location_region = location.get('region')
+            transaction.location_postal_code = location.get('postal_code')
+            
+            synced += 1
+        
+        db.session.commit()
+        return synced
+    
+    def _sync_investments(self, item: PlaidItem) -> tuple:
+        """Sync investment holdings and transactions"""
+        accounts = Account.query.filter_by(plaid_item_id=item.id).all()
+        account_map = {a.account_id: a.id for a in accounts}
+        
+        holdings_synced = 0
+        txns_synced = 0
+        
+        try:
+            # Sync holdings
+            holdings_data = self.plaid_service.get_investments_holdings(item.access_token)
+            
+            # First, sync securities
+            security_map = {}
+            for sec_data in holdings_data.get('securities', []):
+                security = self._sync_security(sec_data)
+                security_map[sec_data['security_id']] = security.id
+            
+            # Then sync holdings
+            for holding_data in holdings_data.get('holdings', []):
+                local_account_id = account_map.get(holding_data['account_id'])
+                if not local_account_id:
+                    continue
+                
+                holding = Holding.query.filter_by(
+                    account_id=local_account_id,
+                    security_id=security_map.get(holding_data['security_id'])
+                ).first()
+                
+                if not holding:
+                    holding = Holding(
+                        account_id=local_account_id,
+                        user_id=item.user_id,
+                        security_id=security_map.get(holding_data['security_id'])
+                    )
+                    db.session.add(holding)
+                
+                holding.quantity = Decimal(str(holding_data.get('quantity', 0)))
+                holding.cost_basis = Decimal(str(holding_data.get('cost_basis', 0)))
+                holding.institution_price = Decimal(str(holding_data.get('institution_price', 0)))
+                holding.institution_value = Decimal(str(holding_data.get('institution_value', 0)))
+                holding.last_updated = datetime.utcnow()
+                
+                # Calculate unrealized gain/loss
+                if holding.cost_basis and holding.cost_basis > 0:
+                    holding.unrealized_gain_loss = holding.institution_value - holding.cost_basis
+                    holding.unrealized_gain_loss_percent = (
+                        holding.unrealized_gain_loss / holding.cost_basis * 100
+                    )
+                
+                holdings_synced += 1
+            
+            db.session.commit()
+        except Exception as e:
+            # Investment accounts might not exist
+            pass
+        
+        try:
+            # Sync investment transactions
+            inv_txn_data = self.plaid_service.get_investments_transactions(
+                item.access_token,
+                start_date=datetime.now() - timedelta(days=365),
+                end_date=datetime.now()
+            )
+            
+            # Sync any new securities
+            for sec_data in inv_txn_data.get('securities', []):
+                security = self._sync_security(sec_data)
+                if sec_data['security_id'] not in security_map:
+                    security_map[sec_data['security_id']] = security.id
+            
+            for txn_data in inv_txn_data.get('investment_transactions', []):
+                local_account_id = account_map.get(txn_data['account_id'])
+                if not local_account_id:
+                    continue
+                
+                inv_txn = InvestmentTransaction.query.filter_by(
+                    investment_transaction_id=txn_data['investment_transaction_id']
+                ).first()
+                
+                if not inv_txn:
+                    inv_txn = InvestmentTransaction(
+                        account_id=local_account_id,
+                        user_id=item.user_id,
+                        investment_transaction_id=txn_data['investment_transaction_id']
+                    )
+                    db.session.add(inv_txn)
+                
+                inv_txn.security_id = security_map.get(txn_data.get('security_id'))
+                inv_txn.date = datetime.strptime(txn_data['date'], '%Y-%m-%d').date()
+                inv_txn.name = txn_data.get('name')
+                inv_txn.type = txn_data.get('type')
+                inv_txn.subtype = txn_data.get('subtype')
+                inv_txn.amount = Decimal(str(txn_data.get('amount', 0)))
+                inv_txn.price = Decimal(str(txn_data.get('price', 0)))
+                inv_txn.quantity = Decimal(str(txn_data.get('quantity', 0)))
+                inv_txn.fees = Decimal(str(txn_data.get('fees', 0)))
+                
+                txns_synced += 1
+            
+            db.session.commit()
+        except Exception as e:
+            pass
+        
+        return holdings_synced, txns_synced
+    
+    def _sync_security(self, sec_data: dict) -> Security:
+        """Sync a security to the database"""
+        security = Security.query.filter_by(
+            security_id=sec_data['security_id']
+        ).first()
+        
+        if not security:
+            security = Security(security_id=sec_data['security_id'])
+            db.session.add(security)
+        
+        security.ticker_symbol = sec_data.get('ticker_symbol')
+        security.cusip = sec_data.get('cusip')
+        security.isin = sec_data.get('isin')
+        security.sedol = sec_data.get('sedol')
+        security.name = sec_data.get('name')
+        security.type = sec_data.get('type')
+        security.close_price = Decimal(str(sec_data.get('close_price', 0)))
+        security.is_cash_equivalent = sec_data.get('is_cash_equivalent', False)
+        
+        # Option contract details
+        option = sec_data.get('option_contract', {})
+        if option:
+            security.option_contract_type = option.get('contract_type')
+            if option.get('expiration_date'):
+                security.option_expiration_date = datetime.strptime(
+                    option['expiration_date'], '%Y-%m-%d'
+                ).date()
+            security.option_strike_price = Decimal(str(option.get('strike_price', 0)))
+            security.option_underlying_ticker = option.get('underlying_security_ticker')
+        
+        return security
+    
+    def _sync_liabilities(self, item: PlaidItem) -> int:
+        """Sync liability information"""
+        accounts = Account.query.filter_by(plaid_item_id=item.id).all()
+        account_map = {a.account_id: a.id for a in accounts}
+        
+        synced = 0
+        
+        try:
+            data = self.plaid_service.get_liabilities(item.access_token)
+            liabilities_data = data.get('liabilities', {})
+            
+            # Credit cards
+            for credit_data in liabilities_data.get('credit', []):
+                local_account_id = account_map.get(credit_data['account_id'])
+                if not local_account_id:
+                    continue
+                
+                liability = Liability.query.filter_by(
+                    account_id=local_account_id,
+                    type='credit'
+                ).first()
+                
+                if not liability:
+                    liability = Liability(
+                        account_id=local_account_id,
+                        user_id=item.user_id,
+                        type='credit'
+                    )
+                    db.session.add(liability)
+                
+                liability.is_overdue = credit_data.get('is_overdue')
+                liability.last_payment_amount = Decimal(str(credit_data.get('last_payment_amount', 0)))
+                liability.last_statement_balance = Decimal(str(credit_data.get('last_statement_balance', 0)))
+                liability.minimum_payment_amount = Decimal(str(credit_data.get('minimum_payment_amount', 0)))
+                
+                aprs = credit_data.get('aprs', [])
+                if aprs:
+                    liability.interest_rate_percentage = Decimal(str(aprs[0].get('apr_percentage', 0)))
+                
+                liability.last_updated = datetime.utcnow()
+                synced += 1
+            
+            # Mortgages
+            for mortgage_data in liabilities_data.get('mortgage', []):
+                local_account_id = account_map.get(mortgage_data['account_id'])
+                if not local_account_id:
+                    continue
+                
+                liability = Liability.query.filter_by(
+                    account_id=local_account_id,
+                    type='mortgage'
+                ).first()
+                
+                if not liability:
+                    liability = Liability(
+                        account_id=local_account_id,
+                        user_id=item.user_id,
+                        type='mortgage'
+                    )
+                    db.session.add(liability)
+                
+                liability.interest_rate_percentage = Decimal(str(mortgage_data.get('interest_rate', {}).get('percentage', 0)))
+                liability.interest_rate_type = mortgage_data.get('interest_rate', {}).get('type')
+                liability.loan_term = mortgage_data.get('loan_term')
+                liability.loan_type_description = mortgage_data.get('loan_type_description')
+                liability.escrow_balance = Decimal(str(mortgage_data.get('escrow_balance', 0)))
+                liability.has_pmi = mortgage_data.get('has_pmi')
+                liability.ytd_interest_paid = Decimal(str(mortgage_data.get('ytd_interest_paid', 0)))
+                liability.ytd_principal_paid = Decimal(str(mortgage_data.get('ytd_principal_paid', 0)))
+                liability.property_address = mortgage_data.get('property_address')
+                liability.last_updated = datetime.utcnow()
+                synced += 1
+            
+            # Student loans
+            for student_data in liabilities_data.get('student', []):
+                local_account_id = account_map.get(student_data['account_id'])
+                if not local_account_id:
+                    continue
+                
+                liability = Liability.query.filter_by(
+                    account_id=local_account_id,
+                    type='student'
+                ).first()
+                
+                if not liability:
+                    liability = Liability(
+                        account_id=local_account_id,
+                        user_id=item.user_id,
+                        type='student'
+                    )
+                    db.session.add(liability)
+                
+                liability.interest_rate_percentage = Decimal(str(student_data.get('interest_rate_percentage', 0)))
+                liability.origination_date = datetime.strptime(
+                    student_data['origination_date'], '%Y-%m-%d'
+                ).date() if student_data.get('origination_date') else None
+                liability.origination_principal_amount = Decimal(str(student_data.get('origination_principal_amount', 0)))
+                liability.ytd_interest_paid = Decimal(str(student_data.get('ytd_interest_paid', 0)))
+                liability.ytd_principal_paid = Decimal(str(student_data.get('ytd_principal_paid', 0)))
+                liability.last_updated = datetime.utcnow()
+                synced += 1
+            
+            db.session.commit()
+        except Exception as e:
+            # Liabilities might not be available for all accounts
+            pass
+        
+        return synced
+    
+    def _create_balance_snapshot(self, account: Account):
+        """Create a daily balance snapshot"""
+        from datetime import date
+        today = date.today()
+        
+        existing = BalanceSnapshot.query.filter_by(
+            account_id=account.id,
+            snapshot_date=today
+        ).first()
+        
+        if not existing:
+            snapshot = BalanceSnapshot(
+                account_id=account.id,
+                user_id=account.user_id,
+                snapshot_date=today,
+                balance_available=account.balance_available,
+                balance_current=account.balance_current,
+                balance_limit=account.balance_limit
+            )
+            db.session.add(snapshot)
+Module 6: Frontend Components
+
+<!-- templates/dashboard/index.html -->
+{% extends "base.html" %}
+
+{% block title %}Financial Dashboard{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.min.css">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+    <!-- Header -->
+    <header class="dashboard-header">
+        <h1>Financial Intelligence Dashboard</h1>
+        <div class="header-actions">
+            <button id="link-account-btn" class="btn btn-primary">
+                <i class="fas fa-plus"></i> Link Account
+            </button>
+            <button id="sync-all-btn" class="btn btn-secondary">
+                <i class="fas fa-sync"></i> Sync All
+            </button>
+        </div>
+    </header>
+
+    <!-- Net Worth Summary Card -->
+    <section class="dashboard-section net-worth-section">
+        <div class="card net-worth-card">
+            <div class="card-header">
+                <h2>Net Worth</h2>
+                <span class="last-updated" id="net-worth-updated"></span>
+            </div>
+            <div class="card-body">
+                <div class="net-worth-display">
+                    <span class="currency">$</span>
+                    <span class="amount" id="net-worth-amount">0</span>
+                </div>
+                <div class="net-worth-change" id="net-worth-change">
+                    <span class="change-amount"></span>
+                    <span class="change-period">vs last month</span>
+                </div>
+            </div>
+            <div class="card-footer">
+                <div class="metric">
+                    <span class="label">Total Assets</span>
+                    <span class="value positive" id="total-assets">$0</span>
+                </div>
+                <div class="metric">
+                    <span class="label">Total Liabilities</span>
+                    <span class="value negative" id="total-liabilities">$0</span>
+                </div>
+                <div class="metric">
+                    <span class="label">Liquidity Ratio</span>
+                    <span class="value" id="liquidity-ratio">0</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Net Worth Trend Chart -->
+        <div class="card chart-card">
+            <div class="card-header">
+                <h3>Net Worth Trend</h3>
+                <div class="chart-controls">
+                    <button class="btn btn-sm active" data-period="30">30D</button>
+                    <button class="btn btn-sm" data-period="90">90D</button>
+                    <button class="btn btn-sm" data-period="365">1Y</button>
+                    <button class="btn btn-sm" data-period="all">All</button>
+                </div>
+            </div>
+            <div class="card-body">
+                <canvas id="net-worth-chart"></canvas>
+            </div>
+        </div>
+    </section>
+
+    <!-- Cash Flow Section -->
+    <section class="dashboard-section cash-flow-section">
+        <div class="section-header">
+            <h2>Cash Flow Analysis</h2>
+            <div class="date-range-picker">
+                <input type="date" id="cf-start-date">
+                <span>to</span>
+                <input type="date" id="cf-end-date">
+            </div>
+        </div>
+        
+        <div class="card-grid">
+            <!-- Income Card -->
+            <div class="card summary-card income-card">
+                <div class="card-icon">
+                    <i class="fas fa-arrow-down"></i>
+                </div>
+                <div class="card-content">
+                    <span class="label">Total Income</span>
+                    <span class="value" id="total-income">$0</span>
+                </div>
+            </div>
+            
+            <!-- Expenses Card -->
+            <div class="card summary-card expense-card">
+                <div class="card-icon">
+                    <i class="fas fa-arrow-up"></i>
+                </div>
+                <div class="card-content">
+                    <span class="label">Total Expenses</span>
+                    <span class="value" id="total-expenses">$0</span>
+                </div>
+            </div>
+            
+            <!-- Net Cash Flow Card -->
+            <div class="card summary-card net-flow-card">
+                <div class="card-icon">
+                    <i class="fas fa-exchange-alt"></i>
+                </div>
+                <div class="card-content">
+                    <span class="label">Net Cash Flow</span>
+                    <span class="value" id="net-cash-flow">$0</span>
+                </div>
+            </div>
+            
+            <!-- Savings Rate Card -->
+            <div class="card summary-card savings-card">
+                <div class="card-icon">
+                    <i class="fas fa-piggy-bank"></i>
+                </div>
+                <div class="card-content">
+                    <span class="label">Savings Rate</span>
+                    <span class="value" id="savings-rate">0%</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Cash Flow Charts -->
+        <div class="chart-row">
+            <div class="card chart-card">
+                <div class="card-header">
+                    <h3>Daily Cash Flow</h3>
+                </div>
+                <div class="card-body">
+                    <canvas id="daily-cash-flow-chart"></canvas>
+                </div>
+            </div>
+            
+            <div class="card chart-card">
+                <div class="card-header">
+                    <h3>Spending by Category</h3>
+                </div>
+                <div class="card-body">
+                    <canvas id="spending-category-chart"></canvas>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Recurring Transactions -->
+        <div class="card">
+            <div class="card-header">
+                <h3>Recurring Transactions</h3>
+            </div>
+            <div class="card-body">
+                <div class="recurring-grid" id="recurring-transactions">
+                    <!-- Populated by JavaScript -->
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Portfolio Section -->
+    <section class="dashboard-section portfolio-section">
+        <div class="section-header">
+            <h2>Investment Portfolio</h2>
+        </div>
+        
+        <div class="card-grid portfolio-summary">
+            <div class="card summary-card">
+                <div class="card-content">
+                    <span class="label">Portfolio Value</span>
+                    <span class="value" id="portfolio-value">$0</span>
+                </div>
+            </div>
+            <div class="card summary-card">
+                <div class="card-content">
+                    <span class="label">Total Gain/Loss</span>
+                    <span class="value" id="portfolio-gain-loss">$0</span>
+                </div>
+            </div>
+            <div class="card summary-card">
+                <div class="card-content">
+                    <span class="label">Return %</span>
+                    <span class="value" id="portfolio-return">0%</span>
+                </div>
+            </div>
+            <div class="card summary-card">
+                <div class="card-content">
+                    <span class="label">Diversification Score</span>
+                    <span class="value" id="diversification-score">0</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="chart-row">
+            <!-- Asset Allocation -->
+            <div class="card chart-card">
+                <div class="card-header">
+                    <h3>Asset Allocation</h3>
+                </div>
+                <div class="card-body">
+                    <canvas id="asset-allocation-chart"></canvas>
+                </div>
+            </div>
+            
+            <!-- Sector Allocation -->
+            <div class="card chart-card">
+                <div class="card-header">
+                    <h3>Sector Allocation</h3>
+                </div>
+                <div class="card-body">
+                    <canvas id="sector-allocation-chart"></canvas>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Holdings Table -->
+        <div class="card">
+            <div class="card-header">
+                <h3>Holdings</h3>
+            </div>
+            <div class="card-body">
+                <table class="data-table" id="holdings-table">
+                    <thead>
+                        <tr>
+                            <th>Symbol</th>
+                            <th>Name</th>
+                            <th>Shares</th>
+                            <th>Price</th>
+                            <th>Value</th>
+                            <th>Cost Basis</th>
+                            <th>Gain/Loss</th>
+                            <th>Return %</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- Populated by JavaScript -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+    <!-- Accounts Section -->
+    <section class="dashboard-section accounts-section">
+        <div class="section-header">
+            <h2>Linked Accounts</h2>
+        </div>
+        
+        <div class="accounts-grid" id="accounts-grid">
+            <!-- Populated by JavaScript -->
+        </div>
+    </section>
+
+    <!-- Recent Transactions -->
+    <section class="dashboard-section transactions-section">
+        <div class="section-header">
+            <h2>Recent Transactions</h2>
+            <a href="{{ url_for('dashboard.transactions') }}" class="view-all">View All →</a>
+        </div>
+        
+        <div class="card">
+            <div class="card-body">
+                <table class="data-table" id="recent-transactions-table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Description</th>
+                            <th>Category</th>
+                            <th>Account</th>
+                            <th>Amount</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- Populated by JavaScript -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+    <!-- Insights & Alerts -->
+    <section class="dashboard-section insights-section">
+        <div class="section-header">
+            <h2>Insights & Recommendations</h2>
+        </div>
+        
+        <div class="insights-grid" id="insights-grid">
+            <!-- Populated by JavaScript -->
+        </div>
+    </section>
+</div>
+
+<!-- Plaid Link Modal -->
+<div id="plaid-link-container"></div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+{% endblock %}
+
+// static/js/dashboard.js
+
+class FinancialDashboard {
+    constructor() {
+        this.charts = {};
+        this.data = {};
+        this.init();
+    }
+
+    async init() {
+        await this.loadDashboardData();
+        this.initCharts();
+        this.bindEvents();
+        this.startAutoRefresh();
+    }
+
+    // ============================================
+    // DATA LOADING
+    // ============================================
+
+    async loadDashboardData() {
+        try {
+            const response = await fetch('/api/dashboard/overview');
+            if (!response.ok) throw new Error('Failed to load dashboard data');
+            this.data = await response.json();
+            this.updateUI();
+        } catch (error) {
+            console.error('Error loading dashboard:', error);
+            this.showError('Failed to load dashboard data');
+        }
+    }
+
+    async loadNetWorthHistory(days = 365) {
+        try {
+            const response = await fetch(`/api/dashboard/net-worth?days=${days}`);
+            const data = await response.json();
+            this.updateNetWorthChart(data.history);
+        } catch (error) {
+            console.error('Error loading net worth history:', error);
+        }
+    }
+
+    async loadCashFlow(startDate, endDate) {
+        try {
+            let url = '/api/dashboard/cash-flow';
+            if (startDate && endDate) {
+                url += `?start_date=${startDate}&end_date=${endDate}`;
+            }
+            const response = await fetch(url);
+            const data = await response.json();
+            this.updateCashFlowUI(data);
+        } catch (error) {
+            console.error('Error loading cash flow:', error);
+        }
+    }
+
+    async loadPortfolio() {
+        try {
+            const response = await fetch('/api/dashboard/portfolio');
+            const data = await response.json();
+            this.updatePortfolioUI(data);
+        } catch (error) {
+            console.error('Error loading portfolio:', error);
+        }
+    }
+
+    // ============================================
+    // UI UPDATES
+    // ============================================
+
+    updateUI() {
+        this.updateNetWorthUI(this.data.net_worth);
+        this.updateCashFlowUI({ analysis: this.data.cash_flow });
+        this.updatePortfolioUI({ summary: this.data.portfolio });
+        this.updateRecentTransactions(this.data.recent_transactions);
+    }
+
+    updateNetWorthUI(data) {
+        // Main net worth display
+        document.getElementById('net-worth-amount').textContent = 
+            this.formatCurrency(data.net_worth, false);
+        
+        document.getElementById('total-assets').textContent = 
+            this.formatCurrency(data.total_assets);
+        
+        document.getElementById('total-liabilities').textContent = 
+            this.formatCurrency(data.total_liabilities);
+        
+        document.getElementById('liquidity-ratio').textContent = 
+            data.liquidity_ratio.toFixed(2);
+
+        // Update accounts breakdown
+        this.updateAccountsGrid(data.accounts_breakdown);
+    }
+
+    updateCashFlowUI(data) {
+        const analysis = data.analysis;
+        
+        document.getElementById('total-income').textContent = 
+            this.formatCurrency(analysis.summary.total_income);
+        
+        document.getElementById('total-expenses').textContent = 
+            this.formatCurrency(analysis.summary.total_expenses);
+        
+        document.getElementById('net-cash-flow').textContent = 
+            this.formatCurrency(analysis.summary.net_cash_flow);
+        
+        // Savings rate
+        if (data.insights) {
+            document.getElementById('savings-rate').textContent = 
+                `${data.insights.savings_rate.toFixed(1)}%`;
+        }
+
+        // Update charts
+        this.updateDailyCashFlowChart(analysis.daily_cash_flow);
+        this.updateSpendingCategoryChart(analysis.expense_breakdown);
+        
+        // Update recurring transactions
+        if (data.recurring) {
+            this.updateRecurringTransactions(data.recurring);
+        }
+        
+        // Update insights
+        if (data.insights) {
+            this.updateInsights(data.insights);
+        }
+    }
+
+    updatePortfolioUI(data) {
+        const summary = data.summary;
+        
+        document.getElementById('portfolio-value').textContent = 
+            this.formatCurrency(summary.total_value);
+        
+        document.getElementById('portfolio-gain-loss').textContent = 
+            this.formatCurrency(summary.total_gain_loss);
+        
+        const returnEl = document.getElementById('portfolio-return');
+        returnEl.textContent = `${summary.total_gain_loss_percent.toFixed(2)}%`;
+        returnEl.classList.toggle('positive', summary.total_gain_loss_percent >= 0);
+        returnEl.classList.toggle('negative', summary.total_gain_loss_percent < 0);
+        
+        if (data.risk_analysis) {
+            document.getElementById('diversification-score').textContent = 
+                data.risk_analysis.diversification_score.toFixed(0);
+        }
+
+        // Update charts
+        this.updateAssetAllocationChart(summary.allocation_by_type);
+        this.updateSectorAllocationChart(summary.allocation_by_sector);
+        
+        // Update holdings table
+        this.updateHoldingsTable(summary.holdings);
+    }
+
+    updateAccountsGrid(accounts) {
+        const grid = document.getElementById('accounts-grid');
+        grid.innerHTML = accounts.map(account => `
+            <div class="account-card ${account.is_asset ? 'asset' : 'liability'}">
+                <div class="account-header">
+                    <span class="account-name">${account.name}</span>
+                    <span class="account-type">${account.subtype || account.type}</span>
+                </div>
+                <div class="account-balance">
+                    ${this.formatCurrency(account.balance)}
+                </div>
+                <div class="account-meta">
+                    <span class="account-mask">****${account.mask || '----'}</span>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    updateRecentTransactions(transactions) {
+        const tbody = document.querySelector('#recent-transactions-table tbody');
+        tbody.innerHTML = transactions.map(txn => `
+            <tr>
+                <td>${this.formatDate(txn.date)}</td>
+                <td>${txn.merchant_name || txn.name}</td>
+                <td><span class="category-badge">${txn.category || 'Uncategorized'}</span></td>
+                <td>${txn.account_name || '-'}</td>
+                <td class="${txn.amount < 0 ? 'positive' : 'negative'}">
+                    ${this.formatCurrency(txn.amount)}
+                </td>
+            </tr>
+        `).join('');
+    }
+
+    updateHoldingsTable(holdings) {
+        const tbody = document.querySelector('#holdings-table tbody');
+        tbody.innerHTML = holdings.map(h => `
+            <tr>
+                <td><strong>${h.ticker}</strong></td>
+                <td>${h.name}</td>
+                <td>${h.quantity.toFixed(4)}</td>
+                <td>${this.formatCurrency(h.price)}</td>
+                <td>${this.formatCurrency(h.value)}</td>
+                <td>${this.formatCurrency(h.cost_basis)}</td>
+                <td class="${h.gain_loss >= 0 ? 'positive' : 'negative'}">
+                    ${this.formatCurrency(h.gain_loss)}
+                </td>
+                <td class="${h.gain_loss_percent >= 0 ? 'positive' : 'negative'}">
+                    ${h.gain_loss_percent.toFixed(2)}%
+                </td>
+            </tr>
+        `).join('');
+    }
+
+    updateRecurringTransactions(recurring) {
+        const container = document.getElementById('recurring-transactions');
+        container.innerHTML = recurring.slice(0, 8).map(r => `
+            <div class="recurring-item ${r.is_income ? 'income' : 'expense'}">
+                <div class="recurring-merchant">${r.merchant}</div>
+                <div class="recurring-amount">${this.formatCurrency(r.average_amount)}</div>
+                <div class="recurring-frequency">${r.frequency}</div>
+                <div class="recurring-next">Next: ${this.formatDate(r.next_expected)}</div>
+            </div>
+        `).join('');
+    }
+
+    updateInsights(insights) {
+        const container = document.getElementById('insights-grid');
+        const cards = [];
+        
+        // Category changes
+        insights.category_changes.forEach(change => {
+            const isIncrease = change.change_percent > 0;
+            cards.push(`
+                <div class="insight-card ${isIncrease ? 'warning' : 'success'}">
+                    <div class="insight-icon">
+                        <i class="fas fa-${isIncrease ? 'arrow-up' : 'arrow-down'}"></i>
+                    </div>
+                    <div class="insight-content">
+                        <div class="insight-title">${change.category} ${isIncrease ? 'Up' : 'Down'}</div>
+                        <div class="insight-detail">
+                            ${Math.abs(change.change_percent).toFixed(1)}% vs last month
+                        </div>
+                    </div>
+                </div>
+            `);
+        });
+        
+        // Recommendations
+        insights.recommendations.forEach(rec => {
+            cards.push(`
+                <div class="insight-card ${rec.priority}">
+                    <div class="insight-icon">
+                        <i class="fas fa-lightbulb"></i>
+                    </div>
+                    <div class="insight-content">
+                        <div class="insight-title">Recommendation</div>
+                        <div class="insight-detail">${rec.message}</div>
+                    </div>
+                </div>
+            `);
+        });
+        
+        container.innerHTML = cards.join('');
+    }
+
+    // ============================================
+    // CHARTS
+    // ============================================
+
+    initCharts() {
+        // Net Worth Trend Chart
+        const nwCtx = document.getElementById('net-worth-chart').getContext('2d');
+        this.charts.netWorth = new Chart(nwCtx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Net Worth',
+                    data: [],
+                    borderColor: '#4F46E5',
+                    backgroundColor: 'rgba(79, 70, 229, 0.1)',
+                    fill: true,
+                    tension: 0.4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false }
+                },
+                scales: {
+                    y: {
+                        ticks: {
+                            callback: (value) => this.formatCurrencyShort(value)
+                        }
+                    }
+                }
+            }
+        });
+
+        // Daily Cash Flow Chart
+        const cfCtx = document.getElementById('daily-cash-flow-chart').getContext('2d');
+        this.charts.dailyCashFlow = new Chart(cfCtx, {
+            type: 'bar',
+            data: {
+                labels: [],
+                datasets: [
+                    {
+                        label: 'Income',
+                        data: [],
+                        backgroundColor: '#10B981'
+                    },
+                    {
+                        label: 'Expenses',
+                        data: [],
+                        backgroundColor: '#EF4444'
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        ticks: {
+                            callback: (value) => this.formatCurrencyShort(value)
+                        }
+                    }
+                }
+            }
+        });
+
+        // Spending Category Chart
+        const scCtx = document.getElementById('spending-category-chart').getContext('2d');
+        this.charts.spendingCategory = new Chart(scCtx, {
+            type: 'doughnut',
+            data: {
+                labels: [],
+                datasets: [{
+                    data: [],
+                    backgroundColor: [
+                        '#4F46E5', '#10B981', '#F59E0B', '#EF4444',
+                        '#8B5CF6', '#EC4899', '#06B6D4', '#84CC16'
+                    ]
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'right'
+                    }
+                }
+            }
+        });
+
+        // Asset Allocation Chart
+        const aaCtx = document.getElementById('asset-allocation-chart').getContext('2d');
+        this.charts.assetAllocation = new Chart(aaCtx, {
+            type: 'doughnut',
+            data: {
+                labels: [],
+                datasets: [{
+                    data: [],
+                    backgroundColor: [
+                        '#4F46E5', '#10B981', '#F59E0B', '#EF4444',
+                        '#8B5CF6', '#EC4899'
+                    ]
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false
+            }
+        });
+
+        // Sector Allocation Chart
+        const saCtx = document.getElementById('sector-allocation-chart').getContext('2d');
+        this.charts.sectorAllocation = new Chart(saCtx, {
+            type: 'pie',
+            data: {
+                labels: [],
+                datasets: [{
+                    data: [],
+                    backgroundColor: [
+                        '#4F46E5', '#10B981', '#F59E0B', '#EF4444',
+                        '#8B5CF6', '#EC4899', '#06B6D4', '#84CC16',
+                        '#F97316', '#14B8A6'
+                    ]
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false
+            }
+        });
+
+        // Load initial chart data
+        this.loadNetWorthHistory(365);
+    }
+
+    updateNetWorthChart(history) {
+        const chart = this.charts.netWorth;
+        chart.data.labels = history.map(h => this.formatDateShort(h.date));
+        chart.data.datasets[0].data = history.map(h => h.net_worth);
+        chart.update();
+    }
+
+    updateDailyCashFlowChart(dailyData) {
+        const chart = this.charts.dailyCashFlow;
+        const sortedDates = Object.keys(dailyData).sort();
+        
+        chart.data.labels = sortedDates.map(d => this.formatDateShort(d));
+        chart.data.datasets[0].data = sortedDates.map(d => dailyData[d].income);
+        chart.data.datasets[1].data = sortedDates.map(d => dailyData[d].expenses);
+        chart.update();
+    }
+
+    updateSpendingCategoryChart(breakdown) {
+        const chart = this.charts.spendingCategory;
+        const entries = Object.entries(breakdown)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 8);
+        
+        chart.data.labels = entries.map(e => e[0]);
+        chart.data.datasets[0].data = entries.map(e => e[1]);
+        chart.update();
+    }
+
+    updateAssetAllocationChart(allocation) {
+        const chart = this.charts.assetAllocation;
+        const entries = Object.entries(allocation);
+        
+        chart.data.labels = entries.map(e => e[0]);
+        chart.data.datasets[0].data = entries.map(e => e[1]);
+        chart.update();
+    }
+
+    updateSectorAllocationChart(allocation) {
+        const chart = this.charts.sectorAllocation;
+        const entries = Object.entries(allocation);
+        
+        chart.data.labels = entries.map(e => e[0]);
+        chart.data.datasets[0].data = entries.map(e => e[1]);
+        chart.update();
+    }
+
+    // ============================================
+    // PLAID LINK INTEGRATION
+    // ============================================
+
+    async initPlaidLink() {
+        try {
+            const response = await fetch('/api/plaid/create-link-token', {
+                method: 'POST'
+            });
+            const data = await response.json();
+            
+            const handler = Plaid.create({
+                token: data.link_token,
+                onSuccess: async (public_token, metadata) => {
+                    await this.exchangeToken(public_token, metadata);
+                },
+                onExit: (err, metadata) => {
+                    if (err) {
+                        console.error('Link exit error:', err);
+                    }
+                },
+                onEvent: (eventName, metadata) => {
+                    console.log('Link event:', eventName);
+                }
+            });
+            
+            handler.open();
+        } catch (error) {
+            console.error('Error initializing Plaid Link:', error);
+            this.showError('Failed to initialize account linking');
+        }
+    }
+
+    async exchangeToken(publicToken, metadata) {
+        try {
+            const response = await fetch('/api/plaid/exchange-token', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    public_token: publicToken,
+                    institution: metadata.institution
+                })
+            });
+            
+            if (!response.ok) throw new Error('Failed to exchange token');
+            
+            const data = await response.json();
+            this.showSuccess(`Successfully linked ${data.institution_name}`);
+            
+            // Reload dashboard data
+            await this.loadDashboardData();
+        } catch (error) {
+            console.error('Error exchanging token:', error);
+            this.showError('Failed to link account');
+        }
+    }
+
+    // ============================================
+    // EVENT HANDLERS
+    // ============================================
+
+    bindEvents() {
+        // Link account button
+        document.getElementById('link-account-btn').addEventListener('click', () => {
+            this.initPlaidLink();
+        });
+
+        // Sync all button
+        document.getElementById('sync-all-btn').addEventListener('click', async () => {
+            await this.syncAllAccounts();
+        });
+
+        // Net worth period buttons
+        document.querySelectorAll('.chart-controls button').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                document.querySelectorAll('.chart-controls button').forEach(b => 
+                    b.classList.remove('active'));
+                e.target.classList.add('active');
+                
+                const period = e.target.dataset.period;

@@ -1,0 +1,328 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - FinanceIQ{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.min.css">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+{% endblock %}
+
+{% block body %}
+<div class="dashboard-layout">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <a href="{{ url_for('main.dashboard') }}" class="logo">
+                <i class="fas fa-chart-line"></i>
+                <span>FinanceIQ</span>
+            </a>
+        </div>
+
+        <nav class="sidebar-nav">
+            <ul>
+                <li class="active">
+                    <a href="{{ url_for('main.dashboard') }}">
+                        <i class="fas fa-home"></i>
+                        <span>Dashboard</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="{{ url_for('main.accounts') }}">
+                        <i class="fas fa-wallet"></i>
+                        <span>Accounts</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="{{ url_for('main.transactions') }}">
+                        <i class="fas fa-exchange-alt"></i>
+                        <span>Transactions</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="{{ url_for('main.investments') }}">
+                        <i class="fas fa-briefcase"></i>
+                        <span>Investments</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="{{ url_for('main.settings') }}">
+                        <i class="fas fa-cog"></i>
+                        <span>Settings</span>
+                    </a>
+                </li>
+            </ul>
+        </nav>
+
+        <div class="sidebar-footer">
+            <div class="user-info">
+                <div class="user-avatar">
+                    <i class="fas fa-user"></i>
+                </div>
+                <div class="user-details">
+                    <span class="user-name">{{ current_user.full_name }}</span>
+                    <span class="user-email">{{ current_user.email }}</span>
+                </div>
+            </div>
+            <a href="{{ url_for('auth.logout') }}" class="logout-btn" title="Sign Out">
+                <i class="fas fa-sign-out-alt"></i>
+            </a>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <!-- Header -->
+        <header class="dashboard-header">
+            <div class="header-left">
+                <button class="sidebar-toggle" id="sidebarToggle">
+                    <i class="fas fa-bars"></i>
+                </button>
+                <div class="header-title">
+                    <h1>Dashboard</h1>
+                    <p class="header-subtitle">Welcome back, {{ current_user.first_name or 'there' }}!</p>
+                </div>
+            </div>
+            <div class="header-right">
+                <button class="btn btn-outline" id="syncBtn" onclick="syncAllAccounts()">
+                    <i class="fas fa-sync-alt"></i>
+                    <span>Sync</span>
+                </button>
+                <button class="btn btn-primary" id="addAccountBtn" onclick="openPlaidLink()">
+                    <i class="fas fa-plus"></i>
+                    <span>Link Account</span>
+                </button>
+            </div>
+        </header>
+
+        <!-- Dashboard Content -->
+        <div class="dashboard-content">
+            <!-- Loading State -->
+            <div class="loading-overlay" id="loadingOverlay">
+                <div class="loading-spinner">
+                    <i class="fas fa-circle-notch fa-spin"></i>
+                    <p>Loading your financial data...</p>
+                </div>
+            </div>
+
+            <!-- Net Worth Section -->
+            <section class="dashboard-section net-worth-section">
+                <div class="section-grid">
+                    <!-- Main Net Worth Card -->
+                    <div class="card net-worth-card">
+                        <div class="card-header">
+                            <h2>Net Worth</h2>
+                            <span class="last-updated" id="lastUpdated"></span>
+                        </div>
+                        <div class="card-body">
+                            <div class="net-worth-value">
+                                <span class="currency">$</span>
+                                <span class="amount" id="netWorthAmount">--</span>
+                            </div>
+                            <div class="net-worth-change" id="netWorthChange">
+                                <span class="change-badge"></span>
+                            </div>
+                            <div class="net-worth-breakdown">
+                                <div class="breakdown-item assets">
+                                    <span class="breakdown-label">Total Assets</span>
+                                    <span class="breakdown-value" id="totalAssets">$--</span>
+                                </div>
+                                <div class="breakdown-item liabilities">
+                                    <span class="breakdown-label">Total Liabilities</span>
+                                    <span class="breakdown-value" id="totalLiabilities">$--</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Net Worth Chart -->
+                    <div class="card chart-card">
+                        <div class="card-header">
+                            <h3>Net Worth Over Time</h3>
+                            <div class="chart-period-selector">
+                                <button class="period-btn active" data-period="30">1M</button>
+                                <button class="period-btn" data-period="90">3M</button>
+                                <button class="period-btn" data-period="180">6M</button>
+                                <button class="period-btn" data-period="365">1Y</button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <canvas id="netWorthChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Quick Stats -->
+            <section class="dashboard-section stats-section">
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon income">
+                            <i class="fas fa-arrow-down"></i>
+                        </div>
+                        <div class="stat-content">
+                            <span class="stat-label">Income (30d)</span>
+                            <span class="stat-value" id="totalIncome">$--</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon expenses">
+                            <i class="fas fa-arrow-up"></i>
+                        </div>
+                        <div class="stat-content">
+                            <span class="stat-label">Expenses (30d)</span>
+                            <span class="stat-value" id="totalExpenses">$--</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon savings">
+                            <i class="fas fa-piggy-bank"></i>
+                        </div>
+                        <div class="stat-content">
+                            <span class="stat-label">Savings Rate</span>
+                            <span class="stat-value" id="savingsRate">--%</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon portfolio">
+                            <i class="fas fa-chart-pie"></i>
+                        </div>
+                        <div class="stat-content">
+                            <span class="stat-label">Portfolio Value</span>
+                            <span class="stat-value" id="portfolioValue">$--</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Cash Flow & Spending -->
+            <section class="dashboard-section cashflow-section">
+                <div class="section-grid two-cols">
+                    <!-- Cash Flow Chart -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>Cash Flow</h3>
+                            <span class="card-subtitle">Last 30 days</span>
+                        </div>
+                        <div class="card-body">
+                            <canvas id="cashFlowChart"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- Spending by Category -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>Spending by Category</h3>
+                            <span class="card-subtitle">This month</span>
+                        </div>
+                        <div class="card-body">
+                            <canvas id="spendingChart"></canvas>
+                            <div class="spending-legend" id="spendingLegend"></div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Accounts & Transactions -->
+            <section class="dashboard-section accounts-section">
+                <div class="section-grid two-cols">
+                    <!-- Linked Accounts -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>Accounts</h3>
+                            <a href="{{ url_for('main.accounts') }}" class="card-link">View All</a>
+                        </div>
+                        <div class="card-body">
+                            <div class="accounts-list" id="accountsList">
+                                <div class="empty-state">
+                                    <i class="fas fa-university"></i>
+                                    <p>No accounts linked yet</p>
+                                    <button class="btn btn-primary btn-sm" onclick="openPlaidLink()">
+                                        Link Your First Account
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Recent Transactions -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>Recent Transactions</h3>
+                            <a href="{{ url_for('main.transactions') }}" class="card-link">View All</a>
+                        </div>
+                        <div class="card-body">
+                            <div class="transactions-list" id="transactionsList">
+                                <div class="empty-state">
+                                    <i class="fas fa-receipt"></i>
+                                    <p>No transactions yet</p>
+                                    <span>Link an account to see your transactions</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Insights & Portfolio -->
+            <section class="dashboard-section insights-section">
+                <div class="section-grid two-cols">
+                    <!-- Insights -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>
+                                <i class="fas fa-lightbulb"></i>
+                                Insights
+                            </h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="insights-list" id="insightsList">
+                                <div class="insight-item">
+                                    <div class="insight-icon">
+                                        <i class="fas fa-chart-line"></i>
+                                    </div>
+                                    <div class="insight-content">
+                                        <p>Link your accounts to get personalized financial insights.</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Portfolio Summary -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>Portfolio Summary</h3>
+                            <a href="{{ url_for('main.investments') }}" class="card-link">Details</a>
+                        </div>
+                        <div class="card-body">
+                            <div class="portfolio-summary" id="portfolioSummary">
+                                <div class="portfolio-total">
+                                    <span class="portfolio-label">Total Value</span>
+                                    <span class="portfolio-value" id="portfolioTotal">$--</span>
+                                </div>
+                                <div class="portfolio-gain">
+                                    <span class="portfolio-label">Total Gain/Loss</span>
+                                    <span class="portfolio-value" id="portfolioGain">$--</span>
+                                </div>
+                                <canvas id="allocationChart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </main>
+</div>
+
+<!-- Plaid Link Container -->
+<div id="plaid-link-container"></div>
+
+<!-- Toast Notifications -->
+<div class="toast-container" id="toastContainer"></div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+{% endblock %}

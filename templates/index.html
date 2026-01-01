@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+
+{% block title %}Welcome - Financial Intelligence Dashboard{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/landing.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="landing-page">
+    <!-- Hero Section -->
+    <header class="hero">
+        <nav class="nav-container">
+            <div class="logo">
+                <i class="fas fa-chart-line"></i>
+                <span>FinanceIQ</span>
+            </div>
+            <div class="nav-links">
+                <a href="{{ url_for('auth.login') }}" class="btn btn-ghost">Sign In</a>
+                <a href="{{ url_for('auth.register') }}" class="btn btn-primary">Get Started</a>
+            </div>
+        </nav>
+        
+        <div class="hero-content">
+            <h1>Your Complete Financial Picture</h1>
+            <p class="hero-subtitle">
+                Connect all your accounts, track your net worth, analyze cash flow, 
+                and make smarter financial decisions with AI-powered insights.
+            </p>
+            <div class="hero-cta">
+                <a href="{{ url_for('auth.register') }}" class="btn btn-primary btn-lg">
+                    <i class="fas fa-rocket"></i>
+                    Start Free
+                </a>
+                <a href="#features" class="btn btn-outline btn-lg">
+                    Learn More
+                </a>
+            </div>
+        </div>
+        
+        <div class="hero-visual">
+            <div class="dashboard-preview">
+                <div class="preview-card net-worth-preview">
+                    <div class="preview-label">Net Worth</div>
+                    <div class="preview-value">$284,532</div>
+                    <div class="preview-change positive">
+                        <i class="fas fa-arrow-up"></i> +$12,340 this month
+                    </div>
+                </div>
+                <div class="preview-cards-row">
+                    <div class="preview-card small">
+                        <div class="preview-label">Income</div>
+                        <div class="preview-value">$8,500</div>
+                    </div>
+                    <div class="preview-card small">
+                        <div class="preview-label">Expenses</div>
+                        <div class="preview-value">$4,230</div>
+                    </div>
+                    <div class="preview-card small">
+                        <div class="preview-label">Savings</div>
+                        <div class="preview-value">50%</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Features Section -->
+    <section id="features" class="features-section">
+        <h2>Everything You Need to Master Your Money</h2>
+        
+        <div class="features-grid">
+            <div class="feature-card">
+                <div class="feature-icon">
+                    <i class="fas fa-university"></i>
+                </div>
+                <h3>Connect All Accounts</h3>
+                <p>Link bank accounts, credit cards, investments, and loans from over 11,000 financial institutions securely with Plaid.</p>
+            </div>
+            
+            <div class="feature-card">
+                <div class="feature-icon">
+                    <i class="fas fa-chart-area"></i>
+                </div>
+                <h3>Net Worth Tracking</h3>
+                <p>Watch your wealth grow with automatic daily snapshots. See your assets, liabilities, and net worth trends over time.</p>
+            </div>
+            
+            <div class="feature-card">
+                <div class="feature-icon">
+                    <i class="fas fa-exchange-alt"></i>
+                </div>
+                <h3>Cash Flow Analysis</h3>
+                <p>Understand where your money goes. Categorize transactions automatically and discover spending patterns.</p>
+            </div>
+            
+            <div class="feature-card">
+                <div class="feature-icon">
+                    <i class="fas fa-briefcase"></i>
+                </div>
+                <h3>Portfolio Management</h3>
+                <p>Track your investments across all accounts. Monitor holdings, gains/losses, and dividend income.</p>
+            </div>
+            
+            <div class="feature-card">
+                <div class="feature-icon">
+                    <i class="fas fa-bell"></i>
+                </div>
+                <h3>Smart Insights</h3>
+                <p>Get personalized recommendations and alerts about unusual spending, bills, and opportunities to save.</p>
+            </div>
+            
+            <div class="feature-card">
+                <div class="feature-icon">
+                    <i class="fas fa-shield-alt"></i>
+                </div>
+                <h3>Bank-Level Security</h3>
+                <p>Your data is encrypted and secure. We use the same security standards as major financial institutions.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA Section -->
+    <section class="cta-section">
+        <h2>Ready to Take Control of Your Finances?</h2>
+        <p>Join thousands of users who trust FinanceIQ to manage their money.</p>
+        <a href="{{ url_for('auth.register') }}" class="btn btn-primary btn-lg">
+            Create Free Account
+        </a>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="footer-content">
+            <div class="footer-logo">
+                <i class="fas fa-chart-line"></i>
+                <span>FinanceIQ</span>
+            </div>
+            <p>&copy; 2025 FinanceIQ. Your finances, simplified.</p>
+        </div>
+    </footer>
+</div>
+{% endblock %}

@@ -1,0 +1,252 @@
+{% extends "base.html" %}
+
+{% block title %}Investments - FinanceIQ{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+{% endblock %}
+
+{% block body %}
+<div class="dashboard-layout">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <a href="{{ url_for('main.dashboard') }}" class="logo">
+                <i class="fas fa-chart-line"></i>
+                <span>FinanceIQ</span>
+            </a>
+        </div>
+
+        <nav class="sidebar-nav">
+            <ul>
+                <li>
+                    <a href="{{ url_for('main.dashboard') }}">
+                        <i class="fas fa-home"></i>
+                        <span>Dashboard</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="{{ url_for('main.accounts') }}">
+                        <i class="fas fa-wallet"></i>
+                        <span>Accounts</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="{{ url_for('main.transactions') }}">
+                        <i class="fas fa-exchange-alt"></i>
+                        <span>Transactions</span>
+                    </a>
+                </li>
+                <li class="active">
+                    <a href="{{ url_for('main.investments') }}">
+                        <i class="fas fa-briefcase"></i>
+                        <span>Investments</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="{{ url_for('main.settings') }}">
+                        <i class="fas fa-cog"></i>
+                        <span>Settings</span>
+                    </a>
+                </li>
+            </ul>
+        </nav>
+
+        <div class="sidebar-footer">
+            <div class="user-info">
+                <div class="user-avatar">
+                    <i class="fas fa-user"></i>
+                </div>
+                <div class="user-details">
+                    <span class="user-name">{{ current_user.full_name }}</span>
+                    <span class="user-email">{{ current_user.email }}</span>
+                </div>
+            </div>
+            <a href="{{ url_for('auth.logout') }}" class="logout-btn" title="Sign Out">
+                <i class="fas fa-sign-out-alt"></i>
+            </a>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <header class="dashboard-header">
+            <div class="header-left">
+                <button class="sidebar-toggle" id="sidebarToggle">
+                    <i class="fas fa-bars"></i>
+                </button>
+                <div class="header-title">
+                    <h1>Investments</h1>
+                    <p class="header-subtitle">Track your portfolio performance</p>
+                </div>
+            </div>
+        </header>
+
+        <div class="dashboard-content">
+            <div class="loading-overlay" id="loadingOverlay">
+                <div class="loading-spinner">
+                    <i class="fas fa-circle-notch fa-spin"></i>
+                    <p>Loading portfolio...</p>
+                </div>
+            </div>
+
+            <!-- Portfolio Overview -->
+            <section class="dashboard-section">
+                <div class="stats-grid">
+                    <div class="stat-card large">
+                        <div class="stat-icon portfolio">
+                            <i class="fas fa-briefcase"></i>
+                        </div>
+                        <div class="stat-content">
+                            <span class="stat-label">Total Portfolio Value</span>
+                            <span class="stat-value" id="portfolioValue">$--</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon cost">
+                            <i class="fas fa-wallet"></i>
+                        </div>
+                        <div class="stat-content">
+                            <span class="stat-label">Cost Basis</span>
+                            <span class="stat-value" id="costBasis">$--</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon gains">
+                            <i class="fas fa-chart-line"></i>
+                        </div>
+                        <div class="stat-content">
+                            <span class="stat-label">Total Gain/Loss</span>
+                            <span class="stat-value" id="totalGain">$--</span>
+                            <span class="stat-change" id="gainPercent">--%</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon dividends">
+                            <i class="fas fa-coins"></i>
+                        </div>
+                        <div class="stat-content">
+                            <span class="stat-label">Dividend Income (YTD)</span>
+                            <span class="stat-value" id="dividendIncome">$--</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Allocation & Holdings -->
+            <section class="dashboard-section">
+                <div class="section-grid two-cols">
+                    <!-- Allocation Chart -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>Asset Allocation</h3>
+                        </div>
+                        <div class="card-body">
+                            <canvas id="allocationChart"></canvas>
+                            <div class="allocation-legend" id="allocationLegend"></div>
+                        </div>
+                    </div>
+
+                    <!-- Risk Analysis -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>Risk Analysis</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="risk-metrics" id="riskMetrics">
+                                <div class="risk-item">
+                                    <span class="risk-label">Diversification Score</span>
+                                    <div class="risk-bar">
+                                        <div class="risk-fill" id="diversificationBar" style="width: 0%"></div>
+                                    </div>
+                                    <span class="risk-value" id="diversificationScore">--</span>
+                                </div>
+                                <div class="risk-item">
+                                    <span class="risk-label">Concentration Risk</span>
+                                    <span class="risk-badge" id="concentrationRisk">--</span>
+                                </div>
+                                <div class="risk-item">
+                                    <span class="risk-label">Number of Holdings</span>
+                                    <span class="risk-value" id="holdingsCount">--</span>
+                                </div>
+                                <div class="risk-item">
+                                    <span class="risk-label">Number of Sectors</span>
+                                    <span class="risk-value" id="sectorsCount">--</span>
+                                </div>
+                            </div>
+                            <div class="recommendations" id="recommendations">
+                                <h4>Recommendations</h4>
+                                <ul id="recommendationsList"></ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Holdings Table -->
+            <section class="dashboard-section">
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Holdings</h3>
+                        <span class="holdings-count" id="holdingsCountLabel">0 holdings</span>
+                    </div>
+                    <div class="card-body no-padding">
+                        <div class="holdings-table-container">
+                            <table class="holdings-table" id="holdingsTable">
+                                <thead>
+                                    <tr>
+                                        <th>Symbol</th>
+                                        <th>Name</th>
+                                        <th>Type</th>
+                                        <th class="text-right">Shares</th>
+                                        <th class="text-right">Price</th>
+                                        <th class="text-right">Value</th>
+                                        <th class="text-right">Cost Basis</th>
+                                        <th class="text-right">Gain/Loss</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="holdingsBody">
+                                    <tr class="empty-row">
+                                        <td colspan="8">
+                                            <div class="empty-state">
+                                                <i class="fas fa-chart-pie"></i>
+                                                <p>No holdings to display</p>
+                                                <span>Link an investment account to see your holdings</span>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Recent Investment Activity -->
+            <section class="dashboard-section">
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Recent Activity</h3>
+                        <span class="card-subtitle">Last 90 days</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="activity-list" id="activityList">
+                            <div class="empty-state">
+                                <i class="fas fa-history"></i>
+                                <p>No recent investment activity</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </main>
+</div>
+
+<div class="toast-container" id="toastContainer"></div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="{{ url_for('static', filename='js/investments.js') }}"></script>
+{% endblock %}
