@@ -23,4 +23,4 @@ ENV FLASK_APP=run.py
 ENV FLASK_ENV=production
 
 # Run the command to start the Gunicorn server
-CMD ["sh", "-c", "exec gunicorn --bind 0.0.0.0:$PORT --workers 1 run:app"]
+CMD ["gunicorn", "-c", "gunicorn.conf.py", "run:app"]
