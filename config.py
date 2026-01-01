@@ -29,7 +29,14 @@ class DevelopmentConfig(Config):
 class ProductionConfig(Config):
     """Production configuration"""
     DEBUG = False
-    SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL')
+    
+    @property
+    def SQLALCHEMY_DATABASE_URI(self):
+        database_url = os.environ.get('DATABASE_URL')
+        # Railway uses postgres:// but SQLAlchemy requires postgresql://
+        if database_url and database_url.startswith('postgres://'):
+            database_url = database_url.replace('postgres://', 'postgresql://', 1)
+        return database_url
 
 
 class TestingConfig(Config):

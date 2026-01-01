@@ -23,13 +23,27 @@ def create_app(config_name=None):
                 template_folder='../templates',
                 static_folder='../static')
     
-    # Load configuration
-    app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
-    app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get(
-        'DATABASE_URL', 
-        'sqlite:///financial_dashboard.db'
-    )
+    # Load configuration based on environment
+    if config_name == 'production':
+        from config import ProductionConfig
+        app.config.from_object(ProductionConfig)
+        # Handle Railway's postgres:// URL format
+        database_url = os.environ.get('DATABASE_URL', '')
+        if database_url.startswith('postgres://'):
+            database_url = database_url.replace('postgres://', 'postgresql://', 1)
+        app.config['SQLALCHEMY_DATABASE_URI'] = database_url
+    else:
+        app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
+        app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get(
+            'DATABASE_URL', 
+            'sqlite:///financial_dashboard.db'
+        )
+    
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+    
+    # Ensure SECRET_KEY is set
+    if not app.config.get('SECRET_KEY'):
+        app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
     
     # Plaid Configuration
     app.config['PLAID_CLIENT_ID'] = os.environ.get('PLAID_CLIENT_ID')
