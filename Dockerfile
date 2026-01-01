@@ -23,5 +23,5 @@ EXPOSE $PORT
 ENV FLASK_APP=run.py
 ENV FLASK_ENV=production
 
-# Run the startup script
-CMD ./start.sh
+# Run the command to start the Gunicorn server
+CMD exec gunicorn --bind 0.0.0.0:$PORT --workers 1 run:app
