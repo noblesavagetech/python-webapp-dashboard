@@ -1,9 +1,20 @@
 # gunicorn.conf.py
 import os
 
-# Get the port from the environment variable, default to 8080
+# Bind to the port Railway provides, default to 8080
 port = os.environ.get("PORT", "8080")
-
-# Gunicorn config variables
 bind = f"0.0.0.0:{port}"
-workers = int(os.environ.get("WEB_CONCURRENCY", 1))
+
+# Worker configuration
+workers = int(os.environ.get("WEB_CONCURRENCY", "2"))
+threads = 2
+worker_class = "sync"
+
+# Logging
+accesslog = "-"
+errorlog = "-"
+loglevel = "info"
+
+# Timeout
+timeout = 120
+keepalive = 5
