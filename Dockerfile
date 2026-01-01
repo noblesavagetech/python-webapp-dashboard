@@ -12,9 +12,8 @@ COPY requirements.txt .
 # Install any needed packages specified in requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy startup script
-COPY start.sh .
-RUN chmod +x start.sh
+# Copy the rest of the application's code into the container at /app
+COPY . .
 
 # Make port available to the world outside this container
 EXPOSE $PORT
@@ -24,4 +23,4 @@ ENV FLASK_APP=run.py
 ENV FLASK_ENV=production
 
 # Run the command to start the Gunicorn server
-CMD exec gunicorn --bind 0.0.0.0:$PORT --workers 1 run:app
+CMD ["sh", "-c", "exec gunicorn --bind 0.0.0.0:$PORT --workers 1 run:app"]
