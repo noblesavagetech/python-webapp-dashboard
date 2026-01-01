@@ -24,4 +24,4 @@ ENV FLASK_APP=run.py
 ENV FLASK_ENV=production
 
 # Run the startup script
-CMD ["./start.sh"]
+CMD ./start.sh
